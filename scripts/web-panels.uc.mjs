@@ -8,6 +8,39 @@ import {
   parseWebPanelUnreadCount,
 } from "./web-panels-store.uc.mjs";
 
+// Digit -> panel position. 1..9 map to the first nine panels, 0 to the tenth,
+// matching how browsers number tabs. event.code is used rather than event.key
+// because on several layouts Ctrl+Alt behaves as AltGr and rewrites event.key.
+function panelIndexFromEvent(event) {
+  const match = /^(?:Digit|Numpad)([0-9])$/.exec(event.code || "");
+  const digit = match ? Number(match[1]) : NaN;
+  if (Number.isNaN(digit)) {
+    return -1;
+  }
+  return digit === 0 ? 9 : digit - 1;
+}
+
+// The accelerator is Cmd on macOS and Ctrl everywhere else, so the two flags
+// swap roles by platform. Whichever one is NOT the accelerator must be unheld,
+// otherwise Ctrl+Cmd+1 would also fire on macOS.
+const IS_MACOS = Services.appinfo.OS === "Darwin";
+
+function shortcutMatches(event, spec) {
+  if (!spec || spec === "disabled" || event.repeat) {
+    return false;
+  }
+
+  const accelHeld = IS_MACOS ? event.metaKey : event.ctrlKey;
+  const nonAccelHeld = IS_MACOS ? event.ctrlKey : event.metaKey;
+
+  return (
+    !nonAccelHeld &&
+    accelHeld === spec.includes("accel") &&
+    event.altKey === spec.includes("alt") &&
+    event.shiftKey === spec.includes("shift")
+  );
+}
+
 const ROOT_ID = "sine-web-panels-root";
 const RAIL_ID = "sine-web-panels-rail";
 const LIST_ID = "sine-web-panels-list";
@@ -993,6 +1026,26 @@ class SineWebPanels {
       this.#closeMenu();
       this.#closeEditor();
       this.#closePanel();
+      return;
+    }
+
+    // Toggle the Nth panel on the rail. Separators are skipped, so the
+    // numbering follows the visible panel order rather than the raw item
+    // index. The modifier combination is configurable in the mod's settings.
+    if (!shortcutMatches(event, this.#store.shortcutModifier)) {
+      return;
+    }
+
+    const index = panelIndexFromEvent(event);
+    if (index < 0) {
+      return;
+    }
+
+    const target = this.#items.filter(isPanel)[index];
+    if (target) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.#togglePanel(target);
     }
   };
 
