@@ -11,6 +11,32 @@ import {
 // Digit -> panel position. 1..9 map to the first nine panels, 0 to the tenth,
 // matching how browsers number tabs. event.code is used rather than event.key
 // because on several layouts Ctrl+Alt behaves as AltGr and rewrites event.key.
+// Page titles are mostly noise plus the site name at the end:
+//   "Inbox (1,140) - diego88aku@gmail.com - Gmail"  -> "Gmail"
+//   "(2) WhatsApp"                                  -> "WhatsApp"
+// Take the trailing segment after a separator, minus any unread-count prefix,
+// so panels name themselves without anyone typing anything.
+function prettyPanelName(rawTitle) {
+  const stripped = String(rawTitle ?? "")
+    .replace(/^\s*[([]\d{1,4}[)\]]\s*/, "")
+    .trim();
+  if (!stripped) {
+    return null;
+  }
+
+  const parts = stripped
+    .split(/\s+[-–—|·:]\s+/)
+    .map(part => part.trim())
+    .filter(Boolean);
+  if (!parts.length) {
+    return stripped;
+  }
+
+  const last = parts[parts.length - 1];
+  // A long trailing segment is a headline, not a site name.
+  return last.length <= 40 ? last : parts[0];
+}
+
 function panelIndexFromEvent(event) {
   const match = /^(?:Digit|Numpad)([0-9])$/.exec(event.code || "");
   const digit = match ? Number(match[1]) : NaN;
@@ -50,6 +76,7 @@ const MENU_ID = "sine-web-panels-menu";
 const EDITOR_ID = "sine-web-panels-editor";
 const TAB_MENU_ITEM_ID = "sine-web-panels-tab-context-add";
 const RESIZER_ID = "sine-web-panels-resizer";
+const FINDER_ID = "sine-web-panels-finder";
 
 function isPanel(item) {
   return item?.type === PANEL_TYPE;
@@ -100,6 +127,10 @@ class SineWebPanels {
   #resizeHovering = false;
   #dragState = null;
   #navBar;
+  #finder;
+  #finderInput;
+  #finderList;
+  #finderIndex = 0;
   #tabsProgressListener;
   #navBack;
   #navForward;
@@ -146,6 +177,8 @@ class SineWebPanels {
     this.#resetChromeLayout();
     this.#editor?.remove();
     this.#tabContextMenuItem?.remove();
+    this.#finder?.remove();
+    this.#finder = null;
     this.#navBar?.remove();
     this.#navBar = null;
     this.#resizer?.remove();
@@ -200,7 +233,8 @@ class SineWebPanels {
     this.#editor = this.#buildEditor();
     this.#menu = this.#el("div", { id: MENU_ID, hidden: "true", role: "menu" });
 
-    this.#root.append(this.#backdrop, this.#rail, this.#menu);
+    this.#finder = this.#buildFinder();
+    this.#root.append(this.#backdrop, this.#rail, this.#menu, this.#finder);
     this.#browserChrome.append(this.#root, this.#resizer);
     (this.document.getElementById("mainPopupSet") ?? this.#browserChrome).append(this.#editor);
     this.#mountTabContextMenuItem();
@@ -245,6 +279,7 @@ class SineWebPanels {
     this.window.gBrowser?.tabContainer?.addEventListener("TabClose", this.#onTabClose, { signal });
     this.window.gBrowser?.tabContainer?.addEventListener("TabAttrModified", this.#onTabAttrModified, { signal });
     this.#render();
+
   }
 
   #mountTabContextMenuItem() {
@@ -376,7 +411,7 @@ class SineWebPanels {
   #renderPanelButton(item, index) {
     const button = this.#button({
       className: "sine-web-panels-item sine-web-panels-panel-button",
-      title: item.title || item.url,
+      title: this.#panelName(item),
     });
     button.dataset.itemId = item.id;
     button.dataset.index = String(index);
@@ -458,6 +493,7 @@ class SineWebPanels {
     this.#root.removeAttribute("closing");
     this.#root.setAttribute("active", item.id);
     this.#bindBrowserTitle(item, panelTab.linkedBrowser);
+    this.#store.rememberTitle(item.id, panelTab.label);
     this.#syncUnreadFromTab(item.id);
     this.#render();
     this.window.setTimeout(() => {
@@ -639,6 +675,7 @@ class SineWebPanels {
     browser.setAttribute("sine-web-panels-title-bound", item.id);
     const update = () => {
       this.#syncUnreadFromTab(item.id);
+      this.#store.rememberTitle(item.id, this.#runtime?.get(item.id)?.tab?.label);
       this.#render();
     };
     browser.addEventListener("DOMTitleChanged", update, { signal: this.#abortController.signal });
@@ -803,6 +840,297 @@ class SineWebPanels {
     return bar;
   }
 
+  // A filter over the rail: type to narrow the panel list, Enter opens the
+  // highlighted one. Self-contained — it reads the same #items the rail draws,
+  // so panels never opened this session are searchable too.
+  #buildFinder() {
+    const finder = this.#el("div", { id: FINDER_ID, hidden: "true", role: "dialog" });
+    const input = this.#el("input", {
+      type: "text",
+      placeholder: "Search web panels…",
+      "aria-label": "Search web panels",
+    });
+    const list = this.#el("div", { class: "sine-web-panels-finder-list", role: "listbox" });
+
+    input.addEventListener("input", () => this.#renderFinder(), {
+      signal: this.#abortController.signal,
+    });
+    finder.addEventListener("keydown", event => this.#onFinderKeyDown(event), {
+      signal: this.#abortController.signal,
+      capture: true,
+    });
+
+    finder.append(input, list);
+    this.#finderInput = input;
+    this.#finderList = list;
+    return finder;
+  }
+
+  // Everything the finder can act on, grouped: web panels first, then the
+  // tabs of each space. Panels come from #items (so panels never opened this
+  // session are included); tabs come from gBrowser, minus the hidden tabs the
+  // mod owns.
+  #finderGroups() {
+    const query = (this.#finderInput?.value ?? "").trim().toLowerCase();
+    const hit = (...fields) =>
+      !query || fields.some(f => (f ?? "").toLowerCase().includes(query));
+
+    const groups = [];
+
+    const titles = this.#store.lastTitles;
+    const panels = this.#items
+      .filter(isPanel)
+      .filter(item =>
+        hit(
+          this.#panelName(item),
+          item.name,
+          item.title,
+          item.url,
+          titles[item.id],
+          this.#runtime?.get(item.id)?.tab?.label
+        )
+      )
+      .map(item => ({
+        kind: "panel",
+        item,
+        folder: item.title,
+        label: this.#panelName(item),
+      }));
+    if (panels.length) {
+      groups.push({ id: "panels", title: "Web panels", icon: "◧", entries: panels });
+    }
+
+    // tabs, bucketed by the space they live in
+    const spaces = new Map();
+    const seen = new Set();
+    for (const tab of this.#allTabs()) {
+      if (this.#isPanelTab(tab) || tab.closing) {
+        continue;
+      }
+      const label = tab.label ?? "";
+      const url = tab.linkedBrowser?.currentURI?.spec ?? "";
+      if (!hit(label, url)) {
+        continue;
+      }
+      const spaceId = tab.getAttribute("zen-workspace-id") || "";
+      // Only collapse rows that genuinely point at the same page. Lazily
+      // restored tabs have no currentURI yet, and falling back to the title
+      // there merges distinct tabs whose titles happen to match — which is how
+      // a whole space's worth of results disappeared.
+      if (url) {
+        const dedupeKey = `${spaceId}|${url}`;
+        if (seen.has(dedupeKey)) {
+          continue;
+        }
+        seen.add(dedupeKey);
+      }
+      if (!spaces.has(spaceId)) {
+        spaces.set(spaceId, []);
+      }
+      const group = tab.group;
+      const folder = group?.isZenFolder ? group.label || null : null;
+      spaces.get(spaceId).push({ kind: "tab", tab, folder, label: label || url });
+    }
+
+    for (const [spaceId, entries] of spaces) {
+      const space = this.#spaceInfo(spaceId);
+      groups.push({ id: `space:${spaceId}`, title: space.name, icon: space.icon, entries });
+    }
+
+    // nothing matched: offer to open it instead of dead-ending
+    if (!groups.length && query) {
+      groups.push({
+        id: "open",
+        title: "Open",
+        icon: "＋",
+        entries: [{ kind: "open", query, label: this.#openLabel(query) }],
+      });
+    }
+
+    return groups;
+  }
+
+  // gBrowser.tabs only holds the spaces that have actually been visited — Zen
+  // materialises a space's tabs on first switch. _allStoredTabs carries every
+  // tab, which is what makes unvisited spaces searchable at all.
+  #allTabs() {
+    const stored = this.window.gZenWorkspaces?._allStoredTabs;
+    const live = [...(this.window.gBrowser?.tabs ?? [])];
+    if (!Array.isArray(stored) || !stored.length) {
+      return live;
+    }
+    return [...new Set([...stored, ...live])];
+  }
+
+  // Precedence: a name the user typed, then one derived from the page title
+  // (remembered across restarts), then the hostname we started with.
+  #panelName(item) {
+    if (item.name) {
+      return item.name;
+    }
+    const live = this.#runtime?.get(item.id)?.tab?.label;
+    const remembered = this.#store.lastTitles[item.id];
+    return prettyPanelName(live || remembered) || item.title || item.url;
+  }
+
+  #spaceInfo(spaceId) {
+    const fallback = { name: "Other tabs", icon: "▤" };
+    if (!spaceId) {
+      return fallback;
+    }
+    try {
+      // _workspaceCache IS the array of {uuid, name, icon, position, theme}.
+      const cache = this.window.gZenWorkspaces?._workspaceCache;
+      const all = Array.isArray(cache) ? cache : (cache?.workspaces ?? []);
+      const found = all.find(w => w.uuid === spaceId);
+      if (found) {
+        return { name: found.name || "Space", icon: found.icon || "▤" };
+      }
+    } catch {
+      // Zen internals move between versions; the fallback keeps the finder usable.
+    }
+    return fallback;
+  }
+
+  #openLabel(query) {
+    return normalizeWebPanelUrl(query) ? `Open ${query}` : `Search for “${query}”`;
+  }
+
+  #finderEntries() {
+    return this.#finderGroups().flatMap(group => group.entries);
+  }
+
+  #activateFinderEntry(entry) {
+    this.#closeFinder();
+    if (!entry) {
+      return;
+    }
+    if (entry.kind === "panel") {
+      this.#togglePanel(entry.item);
+      return;
+    }
+    if (entry.kind === "tab") {
+      this.#closePanel({ animate: false });
+      this.window.gBrowser.selectedTab = entry.tab;
+      return;
+    }
+    if (entry.kind === "open") {
+      const url = normalizeWebPanelUrl(entry.query);
+      if (url) {
+        this.#openInNewTab(url);
+      } else {
+        this.window.openTrustedLinkIn?.(
+          this.window.BrowserSearch?.searchURL?.(entry.query) ?? entry.query,
+          "tab"
+        );
+      }
+    }
+  }
+
+  #renderFinder() {
+    if (!this.#finderList) {
+      return;
+    }
+
+    const groups = this.#finderGroups();
+    const entries = groups.flatMap(group => group.entries);
+    this.#finderIndex = Math.max(0, Math.min(this.#finderIndex, entries.length - 1));
+    this.#finderList.replaceChildren();
+
+    let flat = 0;
+    for (const group of groups) {
+      const header = this.#el("div", { class: "sine-web-panels-finder-group" });
+      header.append(
+        this.#el("span", { class: "sine-web-panels-finder-group-icon" }, group.icon),
+        this.#el("span", { class: "sine-web-panels-finder-group-title" }, group.title)
+      );
+      this.#finderList.append(header);
+
+      for (const entry of group.entries) {
+        const index = flat++;
+        const row = this.#button({
+          className: `sine-web-panels-finder-row sine-web-panels-finder-${entry.kind}`,
+        });
+        // Space is the group header; the folder rides on the row so the full
+        // Space / Folder / tab path is visible without nesting the list.
+        if (entry.folder) {
+          row.append(this.#el("span", { class: "sine-web-panels-finder-folder" }, entry.folder));
+        }
+        row.append(this.#el("span", { class: "sine-web-panels-finder-label" }, entry.label));
+        row.setAttribute("role", "option");
+        if (index === this.#finderIndex) {
+          row.setAttribute("selected", "true");
+          this.window.requestAnimationFrame(() =>
+            row.scrollIntoView({ block: "nearest" })
+          );
+        }
+
+        // Panels keep their favicon; tabs reuse the one Zen already resolved;
+        // the open-new row gets the group glyph instead.
+        if (entry.kind === "panel") {
+          const icon = this.#el("img", { class: "sine-web-panels-favicon", alt: "", draggable: "false" });
+          this.#setFaviconSource(icon, entry.item.url, this.#runtime?.get(entry.item.id)?.tab?.getAttribute("image"));
+          row.prepend(icon);
+        } else if (entry.kind === "tab") {
+          const image = entry.tab.getAttribute("image");
+          if (image) {
+            const icon = this.#el("img", { class: "sine-web-panels-favicon", alt: "", draggable: "false", src: image });
+            row.prepend(icon);
+          }
+        }
+
+        row.addEventListener("click", event => {
+          event.stopPropagation();
+          this.#activateFinderEntry(entry);
+        }, { signal: this.#abortController.signal });
+        this.#finderList.append(row);
+      }
+    }
+  }
+
+  #onFinderKeyDown(event) {
+    const entries = this.#finderEntries();
+    if (event.key === "Escape") {
+      event.preventDefault();
+      this.#closeFinder();
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!entries.length) {
+        return;
+      }
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      this.#finderIndex = (this.#finderIndex + step + entries.length) % entries.length;
+      this.#renderFinder();
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      this.#activateFinderEntry(entries[this.#finderIndex]);
+    }
+  }
+
+  #openFinder() {
+    if (!this.#finder) {
+      return;
+    }
+    this.#closeMenu();
+    this.#closeEditor();
+    this.#finderIndex = 0;
+    this.#finderInput.value = "";
+    this.#finder.hidden = false;
+    this.#renderFinder();
+    this.window.requestAnimationFrame(() => this.#finderInput.focus());
+  }
+
+  #closeFinder() {
+    if (this.#finder) {
+      this.#finder.hidden = true;
+    }
+  }
+
   #buildEditor() {
     const editor = this.#xul("panel", {
       id: EDITOR_ID,
@@ -821,6 +1149,14 @@ class SineWebPanels {
       placeholder: "https://calendar.google.com",
       "aria-label": "Web Panel URL",
     });
+    // Optional name: panels otherwise fall back to their hostname, and nobody
+    // searches for "mail.google.com" when they mean Gmail.
+    const nameInput = this.#el("input", {
+      id: "sine-web-panels-name-input",
+      type: "text",
+      placeholder: "Name (optional)",
+      "aria-label": "Web Panel name",
+    });
     const error = this.#el("div", {
       id: "sine-web-panels-editor-error",
       role: "alert",
@@ -832,7 +1168,7 @@ class SineWebPanels {
       className: "sine-web-panels-ghost-button",
     });
     submit.type = "submit";
-    form.append(input, submit, error);
+    form.append(input, nameInput, submit, error);
     form.addEventListener("submit", event => {
       event.preventDefault();
       this.#saveEditor();
@@ -850,12 +1186,14 @@ class SineWebPanels {
   }
 
   #openEditor({ mode, item = null, anchor = null, insertIndex = this.#items.length }) {
-    const input = this.#editor.querySelector("input");
+    const input = this.#editor.querySelector("#sine-web-panels-url-input");
+    const nameInput = this.#editor.querySelector("#sine-web-panels-name-input");
     const submit = this.#editor.querySelector("button");
     const error = this.#editor.querySelector('[role="alert"]');
     this.#closeMenu();
     this.#editorState = { mode, itemId: item?.id ?? null, insertIndex };
     input.value = item?.url ?? this.#currentTabUrl() ?? "";
+    nameInput.value = item?.name ?? "";
     submit.textContent = mode === "edit" ? "Save" : "+ Add";
     submit.disabled = !input.value.trim();
     error.hidden = true;
@@ -868,7 +1206,8 @@ class SineWebPanels {
   }
 
   #saveEditor() {
-    const input = this.#editor.querySelector("input");
+    const input = this.#editor.querySelector("#sine-web-panels-url-input");
+    const nameInput = this.#editor.querySelector("#sine-web-panels-name-input");
     const error = this.#editor.querySelector('[role="alert"]');
     const url = normalizeWebPanelUrl(input.value);
     if (!url) {
@@ -878,12 +1217,12 @@ class SineWebPanels {
     }
 
     if (this.#editorState?.mode === "edit") {
-      const updated = this.#store.updatePanel(this.#editorState.itemId, url);
+      const updated = this.#store.updatePanel(this.#editorState.itemId, url, nameInput.value);
       if (updated) {
         this.#unloadPanel(updated.id);
       }
     } else {
-      this.#store.insert(this.#store.createPanel(url), this.#editorState?.insertIndex ?? this.#items.length);
+      this.#store.insert(this.#store.createPanel(url, nameInput.value), this.#editorState?.insertIndex ?? this.#items.length);
     }
 
     this.#closeEditor();
@@ -980,6 +1319,7 @@ class SineWebPanels {
   #deleteItem(id) {
     this.#unloadPanel(id);
     this.#store.forgetUrl(id);
+    this.#store.forgetTitle(id);
     this.#store.remove(id);
     this.#unreadCounts.delete(id);
     this.#render();
@@ -1177,9 +1517,25 @@ class SineWebPanels {
 
   #onKeyDown = event => {
     if (event.key === "Escape") {
+      // While the finder is open Escape belongs to it, not to the panel.
+      if (this.#finder && !this.#finder.hidden) {
+        this.#closeFinder();
+        return;
+      }
       this.#closeMenu();
       this.#closeEditor();
       this.#closePanel();
+      return;
+    }
+
+    // Same modifier as the panel numbers, on P — "find a panel".
+    if (
+      shortcutMatches(event, this.#store.shortcutModifier) &&
+      (event.code === "KeyD" || event.code === "KeyP")
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.#openFinder();
       return;
     }
 
@@ -1243,6 +1599,7 @@ class SineWebPanels {
     }
 
     this.#syncUnreadFromTab(panelId);
+    this.#store.rememberTitle(panelId, event.target.label);
     this.#render();
   };
 
