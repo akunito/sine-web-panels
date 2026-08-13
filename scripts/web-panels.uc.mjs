@@ -961,8 +961,10 @@ class SineWebPanels {
   }
 
   #onWindowResize = () => {
+    // Clamp for DISPLAY only. Persisting here means a temporarily narrow
+    // window (a smaller screen, a tiled layout) permanently shrinks the width
+    // the user chose, with no way back once the window grows again.
     const width = this.#clampWidth(this.#store.width);
-    this.#store.width = width;
     this.#root.style.setProperty("--sine-web-panels-width", `${width}px`);
     this.document.documentElement.style.setProperty("--sine-web-panels-width", `${width}px`);
   };
