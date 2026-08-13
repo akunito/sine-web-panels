@@ -455,10 +455,18 @@ class SineWebPanels {
     parentBrowser.docShellIsActive = true;
     panelBrowser.zenModeActive = true;
     panelBrowser.docShellIsActive = true;
-    if (this.window.gBrowser?.selectedTab === panelTab && parentTab) {
-      this.window.gBrowser.selectedTab = parentTab;
+    // Select the PANEL tab so WebExtensions resolve the panel's site:
+    // tabs.query({active:true}) is how password managers pick a context, and
+    // with the parent selected they offer credentials for the page behind the
+    // panel. Zen's async tab switcher will then move `deck-selected` onto the
+    // panel container and strip it from the parent, which would stop the parent
+    // painting and turn the overlay into a full replacement — so re-assert it.
+    if (this.window.gBrowser && this.window.gBrowser.selectedTab !== panelTab) {
+      this.window.gBrowser.selectedTab = panelTab;
     }
-    parentTab._visuallySelected = true;
+    if (parentTab) {
+      parentTab._visuallySelected = true;
+    }
     this.#surfaceState = {
       parentTab,
       panelTab,
@@ -468,7 +476,31 @@ class SineWebPanels {
       panelContainer,
       panelFrame,
     };
+    // must run after #surfaceState exists — it reads parentContainer from it
+    this.#keepParentPainted();
     return true;
+  }
+
+  // Zen's AsyncTabSwitcher owns `deck-selected` and runs across frames, so the
+  // class has to be re-applied after it settles, not just once synchronously.
+  #keepParentPainted() {
+    const apply = () => {
+      const parentContainer = this.#surfaceState?.parentContainer;
+      const parentBrowser = this.#surfaceState?.parentBrowser;
+      if (!parentContainer) {
+        return;
+      }
+      parentContainer.classList.add("deck-selected");
+      if (parentBrowser) {
+        parentBrowser.docShellIsActive = true;
+      }
+    };
+
+    apply();
+    this.window.requestAnimationFrame(() => {
+      apply();
+      this.window.requestAnimationFrame(apply);
+    });
   }
 
   #closeSurface({ selectParent = true } = {}) {
@@ -1003,8 +1035,12 @@ class SineWebPanels {
 
     const selectedTab = this.window.gBrowser?.selectedTab;
     const panelTab = this.#runtime?.get(this.#activeId)?.tab;
-    if (selectedTab === panelTab && this.#activeParentTab && !this.#activeParentTab.closing) {
-      this.window.gBrowser.selectedTab = this.#activeParentTab;
+    // The panel tab is intentionally selected while a panel is open.
+    if (selectedTab === panelTab) {
+      if (this.#activeParentTab && !this.#activeParentTab.closing) {
+        this.#activeParentTab._visuallySelected = true;
+      }
+      this.#keepParentPainted();
       return;
     }
 
