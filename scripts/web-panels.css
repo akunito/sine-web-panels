@@ -621,3 +621,80 @@ tab[sine-web-panel-tab="true"] {
     animation: none !important;
   }
 }
+
+/* --------------------------------------------------------------------------
+   Panel navigation bar
+   Sits over the top edge of the panel and only appears while the panel is
+   hovered, so a panel being read shows no chrome at all.
+   -------------------------------------------------------------------------- */
+.sine-web-panels-nav {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: 0;
+  z-index: 3;
+  display: flex;
+  gap: 2px;
+  padding: 4px 6px;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 120ms ease-out, transform 120ms ease-out;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--zen-themed-toolbar-bg, Field) 92%, transparent),
+    transparent
+  );
+}
+
+.browserContainer:hover > .sine-web-panels-nav,
+.sine-web-panels-nav:focus-within {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+.sine-web-panels-nav-button {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0;
+  opacity: 0.75;
+  -moz-context-properties: fill;
+}
+
+/* The icon goes on ::before, matching #sine-web-panels-add-button: a chrome
+   <button> paints its own background over a mask applied directly to it. */
+.sine-web-panels-nav-button::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  display: block;
+  background-color: currentColor;
+}
+
+.sine-web-panels-nav-button:hover:not(:disabled) {
+  background: var(--sine-web-panels-hover);
+  opacity: 1;
+}
+
+.sine-web-panels-nav-button:disabled {
+  opacity: 0.25;
+}
+
+.sine-web-panels-nav-back::before {
+  mask: url("chrome://browser/skin/zen-icons/back.svg") center / 12px 12px no-repeat;
+}
+
+.sine-web-panels-nav-forward::before {
+  mask: url("chrome://browser/skin/zen-icons/forward.svg") center / 12px 12px no-repeat;
+}
+
+.sine-web-panels-nav-home::before {
+  mask: url("chrome://browser/skin/zen-icons/home.svg") center / 12px 12px no-repeat;
+}

@@ -8,6 +8,7 @@ const PREFS = Object.freeze({
   width: "sine.web-panels.width",
   items: "sine.web-panels.items",
   shortcutModifier: "sine.web-panels.shortcut-modifier",
+  lastUrls: "sine.web-panels.last-urls",
 });
 
 // "accel" is the platform's primary modifier: Cmd on macOS, Ctrl elsewhere —
@@ -156,6 +157,52 @@ export class WebPanelsStore {
 
   set shortcutModifier(value) {
     setStringPref(PREFS.shortcutModifier, normalizeShortcutModifier(value));
+  }
+
+  // Where each panel actually was, keyed by panel id. Deliberately a separate
+  // pref from `items`: items is user configuration (order, titles, home urls),
+  // and folding volatile navigation state into it would rewrite the whole rail
+  // on every page change.
+  get lastUrls() {
+    try {
+      const parsed = JSON.parse(readStringPref(PREFS.lastUrls, "{}"));
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  set lastUrls(value) {
+    setStringPref(PREFS.lastUrls, JSON.stringify(value ?? {}));
+  }
+
+  // The URL a panel should open on: where it was last, falling back to its
+  // configured home.
+  resolveUrl(item) {
+    const remembered = normalizeWebPanelUrl(this.lastUrls[item.id]);
+    return remembered ?? item.url;
+  }
+
+  rememberUrl(id, rawUrl) {
+    const url = normalizeWebPanelUrl(rawUrl);
+    if (!url || !id) {
+      return;
+    }
+    const next = this.lastUrls;
+    if (next[id] === url) {
+      return;
+    }
+    next[id] = url;
+    this.lastUrls = next;
+  }
+
+  forgetUrl(id) {
+    const next = this.lastUrls;
+    if (!(id in next)) {
+      return;
+    }
+    delete next[id];
+    this.lastUrls = next;
   }
 
   get items() {
