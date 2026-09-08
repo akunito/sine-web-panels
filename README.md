@@ -70,3 +70,7 @@ https://github.com/dehyde/sine-web-panels
 ```
 
 Store-origin installs should be able to run the included chrome JavaScript without requiring the local unsafe-JS toggle.
+
+## License
+
+This project is licensed under the [Mozilla Public License, version 2.0](LICENSE).
