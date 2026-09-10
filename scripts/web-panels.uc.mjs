@@ -53,7 +53,7 @@ function panelIndexFromEvent(event) {
 // The accelerator is Cmd on macOS and Ctrl everywhere else, so the two flags
 // swap roles by platform. Whichever one is NOT the accelerator must be unheld,
 // otherwise Ctrl+Cmd+1 would also fire on macOS.
-const IS_MACOS = Services.appinfo.OS === "Darwin";
+const IS_MACOS = globalThis.Services?.appinfo?.OS === "Darwin";
 
 function shortcutMatches(event, spec) {
   if (!spec || spec === "disabled" || event.repeat) {
@@ -121,7 +121,7 @@ function fallbackFaviconUrl(panelUrl) {
   }
 }
 
-class SineWebPanels {
+export class SineWebPanels {
   #store = new WebPanelsStore();
   #root;
   #rail;
@@ -2203,11 +2203,19 @@ class SineWebPanels {
   }
 }
 
-const instance = new SineWebPanels(window);
-instance.init();
+// Sine loads this into a chrome window, where `window` is a global and mounting
+// on import is the point. A test runner has no such window, and importing the
+// class there must not try to build a browser UI — so the bootstrap asks first
+// rather than assuming, which is what makes the controller testable at all.
+const chromeWindow = typeof window === "undefined" ? null : window;
 
-if (typeof window.addUnloadListener === "function") {
-  window.addUnloadListener(() => instance.destroy());
-} else {
-  window.addEventListener("unload", () => instance.destroy(), { once: true });
+if (chromeWindow?.document) {
+  const instance = new SineWebPanels(chromeWindow);
+  instance.init();
+
+  if (typeof chromeWindow.addUnloadListener === "function") {
+    chromeWindow.addUnloadListener(() => instance.destroy());
+  } else {
+    chromeWindow.addEventListener("unload", () => instance.destroy(), { once: true });
+  }
 }

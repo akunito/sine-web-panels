@@ -55,6 +55,18 @@ The mod is currently Zen-only. Other Firefox-family browsers would need a separa
   control.
 - `sine.web-panels.items`: JSON list of panel and separator items.
 
+## Tests
+
+```bash
+node --test scripts/tests/*.mjs
+```
+
+`scripts/tests/helpers/chrome-window.mjs` is a fake chrome window — DOM, prefs,
+observers, `gBrowser` and a hand-pumped clock — complete enough to mount the
+real controller against. The tests drive the actual class through it rather
+than asserting on the source text, so a rename does not fail them and a broken
+behaviour does not pass them.
+
 ## Validate
 
 Run the static package checks before publishing:
