@@ -124,8 +124,16 @@
   inset-inline-start: var(--sine-web-panels-gap);
 }
 
-#sine-web-panels-root[disabled] {
+#sine-web-panels-root[disabled],
+/* Fullscreen belongs to the page. The script drops the reserved margin (it is
+   an inline !important, unreachable from here) and sets this attribute. */
+#sine-web-panels-root[fullscreen] {
   display: none;
+}
+
+:root[inFullscreen] #sine-web-panels-resizer,
+:root[inDOMFullscreen] #sine-web-panels-resizer {
+  display: none !important;
 }
 
 #sine-web-panels-backdrop {
@@ -398,6 +406,14 @@ tab[sine-web-panel-tab="true"] {
 
 :root[sine-web-panels-side="left"] .browserSidebarContainer.sine-web-panels-overlay .browserContainer {
   inset-inline-start: var(--sine-web-panels-panel-offset) !important;
+}
+
+/* A video fullscreened from inside a panel: the panel keeps its browser, but
+   the pinned rail-side box has to give way to the whole window. */
+:root[sine-web-panels-panel-fullscreen] .browserSidebarContainer.sine-web-panels-overlay .browserContainer {
+  inset: 0 !important;
+  width: auto !important;
+  min-width: 0 !important;
 }
 
 #sine-web-panels-root[opening][side="right"] ~ .browserSidebarContainer.sine-web-panels-overlay .browserContainer,

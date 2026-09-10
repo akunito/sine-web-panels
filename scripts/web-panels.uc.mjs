@@ -78,6 +78,12 @@ const TAB_MENU_ITEM_ID = "sine-web-panels-tab-context-add";
 const RESIZER_ID = "sine-web-panels-resizer";
 const FINDER_ID = "sine-web-panels-finder";
 
+// Firefox stamps the chrome root when the window goes fullscreen: `inFullscreen`
+// for either flavour (F11 or a page/video calling requestFullscreen), and
+// `inDOMFullscreen` only for the content-driven one. Watching the attributes
+// rather than guessing at event names keeps this working across Zen versions.
+const FULLSCREEN_ATTRIBUTES = ["inFullscreen", "inDOMFullscreen"];
+
 function isPanel(item) {
   return item?.type === PANEL_TYPE;
 }
@@ -132,6 +138,9 @@ class SineWebPanels {
   #finderList;
   #finderIndex = 0;
   #tabsProgressListener;
+  #fullscreen = false;
+  #fullscreenObserver;
+  #restoreAfterFullscreen = null;
   #navBack;
   #navForward;
   #navHome;
@@ -160,6 +169,8 @@ class SineWebPanels {
 
   destroy() {
     this.#abortController.abort();
+    this.#fullscreenObserver?.disconnect();
+    this.#fullscreenObserver = null;
     if (this.#closeTimer) {
       this.window.clearTimeout(this.#closeTimer);
       this.#closeTimer = null;
@@ -278,6 +289,7 @@ class SineWebPanels {
     this.window.gBrowser?.tabContainer?.addEventListener("TabSelect", this.#onTabSelect, { signal });
     this.window.gBrowser?.tabContainer?.addEventListener("TabClose", this.#onTabClose, { signal });
     this.window.gBrowser?.tabContainer?.addEventListener("TabAttrModified", this.#onTabAttrModified, { signal });
+    this.#observeFullscreen();
     this.#render();
 
   }
@@ -343,7 +355,7 @@ class SineWebPanels {
   }
 
   #syncChromeLayout() {
-    if (!this.#browserChrome || !this.#root || !this.#store.enabled) {
+    if (!this.#browserChrome || !this.#root || !this.#store.enabled || this.#fullscreen) {
       return;
     }
 
@@ -369,13 +381,110 @@ class SineWebPanels {
   }
 
   #resetChromeLayout() {
+    this.#releaseChromeLayout();
+    this.document?.documentElement?.style.removeProperty("--sine-web-panels-width");
+  }
+
+  // Give the reserved inline space back to the content without forgetting how
+  // wide the panel is. The margin is written inline with `!important`, so no
+  // stylesheet can override it — fullscreen has to take it off in script.
+  #releaseChromeLayout() {
     this.#browserChrome?.removeAttribute("sine-web-panels-side");
     this.document?.documentElement?.removeAttribute("sine-web-panels-side");
-    this.document?.documentElement?.style.removeProperty("--sine-web-panels-width");
     this.#browserChrome?.style.removeProperty("--sine-web-panels-reserved-inline-size");
     this.#contentContainer?.style.removeProperty("margin-inline-start");
     this.#contentContainer?.style.removeProperty("margin-inline-end");
     this.#contentContainer = null;
+  }
+
+  // The rail is browser chrome, so it has no business sitting on top of a
+  // fullscreen video — and neither has the strip of window it reserves.
+  #observeFullscreen() {
+    this.#fullscreenObserver = new this.window.MutationObserver(() =>
+      this.#syncFullscreenState()
+    );
+    this.#fullscreenObserver.observe(this.document.documentElement, {
+      attributes: true,
+      attributeFilter: FULLSCREEN_ATTRIBUTES,
+    });
+    // The attribute is the source of truth, but the chrome-only `fullscreen`
+    // event fires on the window for F11 too, and catches the transition a tick
+    // earlier. Both funnel into the same idempotent sync.
+    this.window.addEventListener("fullscreen", () => this.#syncFullscreenState(), {
+      signal: this.#abortController.signal,
+      capture: true,
+    });
+    // Sine can hot-load the mod into a window that is already fullscreen.
+    this.#syncFullscreenState();
+  }
+
+  #isFullscreen() {
+    const root = this.document?.documentElement;
+    return Boolean(
+      root?.hasAttribute("inDOMFullscreen") ||
+      root?.hasAttribute("inFullscreen") ||
+      this.window.fullScreen
+    );
+  }
+
+  #syncFullscreenState() {
+    const fullscreen = this.#isFullscreen();
+    if (fullscreen === this.#fullscreen || !this.#root) {
+      return;
+    }
+    this.#fullscreen = fullscreen;
+
+    if (fullscreen) {
+      this.#closeMenu();
+      this.#closeEditor();
+      this.#closeFinder();
+
+      // A video fullscreened from inside a panel is the one case where the
+      // panel must survive: closing it would tear its browser out of the deck
+      // and cancel the fullscreen the user just asked for. Let it take the
+      // whole window instead (the rail still goes away).
+      if (this.#fullscreenTargetsActivePanel()) {
+        this.#restoreAfterFullscreen = null;
+        this.document.documentElement.setAttribute("sine-web-panels-panel-fullscreen", "true");
+      } else {
+        // Remember the open panel so leaving fullscreen puts the window back
+        // the way the user left it.
+        this.#restoreAfterFullscreen = this.#activeId;
+        this.#closePanel({ animate: false });
+      }
+
+      this.#root.setAttribute("fullscreen", "true");
+      this.#releaseChromeLayout();
+      return;
+    }
+
+    this.#root.removeAttribute("fullscreen");
+    this.document.documentElement.removeAttribute("sine-web-panels-panel-fullscreen");
+    this.#syncChromeLayout();
+
+    const restoreId = this.#restoreAfterFullscreen;
+    this.#restoreAfterFullscreen = null;
+    const item = restoreId ? this.#items.find(entry => entry.id === restoreId) : null;
+    if (item) {
+      this.#openPanel(item);
+    }
+  }
+
+  // Gecko sets the chrome document's fullscreenElement to the <browser> hosting
+  // the content that went fullscreen, before it stamps `inDOMFullscreen` — so
+  // by the time either signal reaches us this answer is already reliable.
+  #fullscreenTargetsActivePanel() {
+    const browser = this.#activePanelBrowser();
+    const element = this.document.fullscreenElement;
+    if (!browser || !element) {
+      return false;
+    }
+
+    return (
+      element === browser ||
+      element.contains?.(browser) === true ||
+      browser.contains?.(element) === true
+    );
   }
 
   #findContentContainer() {
@@ -470,6 +579,9 @@ class SineWebPanels {
   }
 
   #openPanel(item) {
+    if (this.#fullscreen) {
+      return;
+    }
     this.#closeEditor();
     if (this.#closeTimer) {
       this.window.clearTimeout(this.#closeTimer);
@@ -1550,6 +1662,12 @@ class SineWebPanels {
   };
 
   #onKeyDown = event => {
+    // Chrome is hidden in fullscreen, so the panel shortcuts stay dormant —
+    // otherwise Ctrl+Alt+1 would open an invisible panel over the video.
+    if (this.#fullscreen) {
+      return;
+    }
+
     if (event.key === "Escape") {
       // While the finder is open Escape belongs to it, not to the panel.
       if (this.#finder && !this.#finder.hidden) {
