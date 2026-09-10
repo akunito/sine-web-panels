@@ -5,6 +5,7 @@ export const DEFAULT_PANEL_WIDTH = 420;
 
 const PREFS = Object.freeze({
   enabled: "sine.web-panels.enabled",
+  collapsed: "sine.web-panels.collapsed",
   width: "sine.web-panels.width",
   items: "sine.web-panels.items",
   shortcutModifier: "sine.web-panels.shortcut-modifier",
@@ -141,6 +142,17 @@ export class WebPanelsStore {
 
   set enabled(value) {
     Services.prefs.setBoolPref(PREFS.enabled, Boolean(value));
+  }
+
+  // Collapsed is not "disabled": the rail is out of sight and gives its strip
+  // of window back, but every panel stays loaded and one hover at the window
+  // edge brings it in. Disabling tears the runtime down.
+  get collapsed() {
+    return Services.prefs.getBoolPref(PREFS.collapsed, false);
+  }
+
+  set collapsed(value) {
+    Services.prefs.setBoolPref(PREFS.collapsed, Boolean(value));
   }
 
   get width() {

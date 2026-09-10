@@ -16,6 +16,10 @@ Version `0.4.0` is Zen-only. It uses Zen-managed hidden tabs and Zen browser con
 - Tab context-menu action to add the clicked web tab to Web Panels.
 - Floating panel surface that opens above the page without resizing it.
 - Managed hidden-tab runtime for extension-compatible panel pages.
+- Collapse the rail to a hover edge: a toggle at the top of the rail, the same
+  shortcut modifier + `B`, or `Hide the rail` in the rail context menu. Hidden,
+  it gives its strip of window back and slides in over the page while the
+  pointer rests at that window edge.
 - Outside-click and Escape dismissal.
 - Resizable panel with a `320px` minimum width.
 - Panel context menu: open in new tab, edit, move, unload, delete.
@@ -38,6 +42,9 @@ The mod is currently Zen-only. Other Firefox-family browsers would need a separa
 ## Preferences
 
 - `sine.web-panels.enabled`: enables or disables the rail.
+- `sine.web-panels.collapsed`: how the rail was last left. Collapsing is
+  per-window; this only seeds new windows and the next session. Not the same as
+  disabling the rail — collapsed, every panel stays loaded.
 - `sine.web-panels.width`: remembered floating panel width.
 - `sine.web-panels.items`: JSON list of panel and separator items.
 

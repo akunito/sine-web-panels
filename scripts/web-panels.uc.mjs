@@ -77,6 +77,12 @@ const EDITOR_ID = "sine-web-panels-editor";
 const TAB_MENU_ITEM_ID = "sine-web-panels-tab-context-add";
 const RESIZER_ID = "sine-web-panels-resizer";
 const FINDER_ID = "sine-web-panels-finder";
+const TOGGLE_ID = "sine-web-panels-toggle";
+const EDGE_ID = "sine-web-panels-edge";
+
+// How long the peeked rail waits after the pointer leaves before sliding back
+// out. Long enough to cross the gap to a panel button without chasing it.
+const PEEK_OUT_DELAY = 320;
 
 // Firefox stamps the chrome root when the window goes fullscreen: `inFullscreen`
 // for either flavour (F11 or a page/video calling requestFullscreen), and
@@ -138,6 +144,11 @@ class SineWebPanels {
   #finderList;
   #finderIndex = 0;
   #tabsProgressListener;
+  #toggle;
+  #edge;
+  #collapsed = false;
+  #peeking = false;
+  #peekTimer = null;
   #fullscreen = false;
   #fullscreenObserver;
   #restoreAfterFullscreen = null;
@@ -177,6 +188,10 @@ class SineWebPanels {
     }
     this.#setResizeHover(false);
     this.#closeSurface({ selectParent: false });
+    if (this.#peekTimer) {
+      this.window.clearTimeout(this.#peekTimer);
+      this.#peekTimer = null;
+    }
     if (this.#prefObserver) {
       Services.prefs.removeObserver(WebPanelsStore.prefs.enabled, this.#prefObserver);
     }
@@ -232,6 +247,10 @@ class SineWebPanels {
       "aria-label": "Web Panels",
     });
     this.#list = this.#el("div", { id: LIST_ID });
+    this.#toggle = this.#button({
+      id: TOGGLE_ID,
+      className: "sine-web-panels-toggle",
+    });
     const addButton = this.#button({
       id: ADD_BUTTON_ID,
       label: "",
@@ -239,13 +258,19 @@ class SineWebPanels {
       className: "sine-web-panels-add-button",
     });
     addButton.setAttribute("aria-label", "New Web Panel");
-    this.#rail.append(this.#list, addButton);
+    this.#rail.append(this.#toggle, this.#list, addButton);
+
+    // The strip the pointer has to reach to bring a collapsed rail back. It is
+    // an element rather than a pointermove test on the window because chrome
+    // never sees pointer moves over remote content — only chrome DOM stacked
+    // above the content browser does.
+    this.#edge = this.#el("div", { id: EDGE_ID, hidden: "true" });
 
     this.#editor = this.#buildEditor();
     this.#menu = this.#el("div", { id: MENU_ID, hidden: "true", role: "menu" });
 
     this.#finder = this.#buildFinder();
-    this.#root.append(this.#backdrop, this.#rail, this.#menu, this.#finder);
+    this.#root.append(this.#backdrop, this.#edge, this.#rail, this.#menu, this.#finder);
     this.#browserChrome.append(this.#root, this.#resizer);
     (this.document.getElementById("mainPopupSet") ?? this.#browserChrome).append(this.#editor);
     this.#mountTabContextMenuItem();
@@ -261,6 +286,14 @@ class SineWebPanels {
         this.#closePanel();
       }
     }, { signal });
+    this.#toggle.addEventListener("click", event => {
+      event.stopPropagation();
+      this.#setCollapsed(!this.#collapsed);
+    }, { signal });
+    this.#edge.addEventListener("pointerenter", () => this.#setPeeking(true), { signal });
+    this.#edge.addEventListener("pointerleave", () => this.#schedulePeekOut(), { signal });
+    this.#rail.addEventListener("pointerenter", () => this.#cancelPeekTimer(), { signal });
+    this.#rail.addEventListener("pointerleave", () => this.#schedulePeekOut(), { signal });
     this.#rail.addEventListener("contextmenu", this.#onRailContextMenu, { signal });
     this.window.addEventListener("pointerdown", this.#onWindowPointerDown, { signal, capture: true });
     this.window.addEventListener("pointermove", this.#onPointerMove, { signal });
@@ -290,6 +323,7 @@ class SineWebPanels {
     this.window.gBrowser?.tabContainer?.addEventListener("TabClose", this.#onTabClose, { signal });
     this.window.gBrowser?.tabContainer?.addEventListener("TabAttrModified", this.#onTabAttrModified, { signal });
     this.#observeFullscreen();
+    this.#applyCollapsedState(this.#store.collapsed);
     this.#render();
 
   }
@@ -323,11 +357,17 @@ class SineWebPanels {
   #observePrefs() {
     this.#prefObserver = {
       observe: (_subject, topic, prefName) => {
-        if (topic === "nsPref:changed" && prefName === WebPanelsStore.prefs.enabled) {
+        if (topic !== "nsPref:changed") {
+          return;
+        }
+        if (prefName === WebPanelsStore.prefs.enabled) {
           this.#applyEnabledState();
         }
       },
     };
+    // Deliberately NOT observing `collapsed`: it is per-window state that is
+    // merely persisted, so hiding the rail in one window must not travel to
+    // the others.
     Services.prefs.addObserver(WebPanelsStore.prefs.enabled, this.#prefObserver);
   }
 
@@ -355,7 +395,15 @@ class SineWebPanels {
   }
 
   #syncChromeLayout() {
-    if (!this.#browserChrome || !this.#root || !this.#store.enabled || this.#fullscreen) {
+    if (!this.#browserChrome || !this.#root || !this.#store.enabled) {
+      return;
+    }
+
+    // Fullscreen belongs to the page, and a collapsed rail has no strip of
+    // window to reserve. Releasing here rather than only at the transition
+    // means every caller re-asserts the right layout.
+    if (this.#fullscreen || this.#collapsed) {
+      this.#releaseChromeLayout();
       return;
     }
 
@@ -395,6 +443,109 @@ class SineWebPanels {
     this.#contentContainer?.style.removeProperty("margin-inline-start");
     this.#contentContainer?.style.removeProperty("margin-inline-end");
     this.#contentContainer = null;
+  }
+
+  // --------------------------------------------------------------------------
+  // Collapse / peek
+  //
+  // Collapsed, the rail slides out and hands its reserved strip back to the
+  // content. It comes in again as an OVERLAY while the pointer rests at that
+  // window edge, so peeking never moves the page underneath.
+  // --------------------------------------------------------------------------
+
+  #setCollapsed(collapsed) {
+    const next = Boolean(collapsed);
+    if (next === this.#collapsed) {
+      return;
+    }
+
+    // Per window. The pref is written to remember how the rail was last left —
+    // it seeds the next window and the next session — but nothing observes it,
+    // so hiding the rail here leaves every other window alone.
+    this.#store.collapsed = next;
+    this.#applyCollapsedState(next);
+  }
+
+  #applyCollapsedState(collapsed) {
+    const changed = collapsed !== this.#collapsed;
+    this.#collapsed = collapsed;
+    if (!this.#root) {
+      return;
+    }
+
+    if (collapsed && changed) {
+      // An open panel would keep covering the very edge the rail hides behind,
+      // and a panel anchored to a rail that is not there reads as a bug.
+      this.#closePanel({ animate: false });
+      this.#closeMenu();
+      this.#closeEditor();
+      this.#closeFinder();
+    }
+
+    this.#setPeeking(false);
+    this.#root.toggleAttribute("collapsed", collapsed);
+    this.#edge.hidden = !collapsed;
+    this.#updateToggleLabel();
+    this.#syncChromeLayout();
+  }
+
+  #updateToggleLabel() {
+    if (!this.#toggle) {
+      return;
+    }
+
+    const label = this.#collapsed ? "Show the panel rail" : "Hide the panel rail";
+    this.#toggle.title = label;
+    this.#toggle.setAttribute("aria-label", label);
+    this.#toggle.setAttribute("aria-pressed", String(!this.#collapsed));
+  }
+
+  #setPeeking(peeking) {
+    this.#cancelPeekTimer();
+    const next = Boolean(peeking) && this.#collapsed;
+    if (next === this.#peeking) {
+      return;
+    }
+
+    this.#peeking = next;
+    this.#root?.toggleAttribute("peeking", next);
+  }
+
+  #schedulePeekOut() {
+    if (!this.#peeking) {
+      return;
+    }
+
+    this.#cancelPeekTimer();
+    this.#peekTimer = this.window.setTimeout(() => {
+      this.#peekTimer = null;
+      if (this.#peekHeld()) {
+        this.#schedulePeekOut();
+        return;
+      }
+      this.#setPeeking(false);
+    }, PEEK_OUT_DELAY);
+  }
+
+  #cancelPeekTimer() {
+    if (this.#peekTimer) {
+      this.window.clearTimeout(this.#peekTimer);
+      this.#peekTimer = null;
+    }
+  }
+
+  // Things the rail owns but that live outside it: sliding away under an open
+  // menu, mid-drag, or while the panel it opened covers the edge would leave
+  // the user with no way back to it.
+  #peekHeld() {
+    return Boolean(
+      this.#activeId ||
+      this.#resizeState ||
+      this.#dragState ||
+      (this.#menu && !this.#menu.hidden) ||
+      (this.#finder && !this.#finder.hidden) ||
+      this.#editorState
+    );
   }
 
   // The rail is browser chrome, so it has no business sitting on top of a
@@ -1428,6 +1579,8 @@ class SineWebPanels {
         this.#render();
       }],
       ["New Web Panel", () => this.#openEditor({ mode: "add", anchor: this.#rail, insertIndex: this.#railInsertIndex })],
+      ["separator"],
+      ["Hide the rail", () => this.#setCollapsed(true)],
     ]);
   };
 
@@ -1677,6 +1830,15 @@ class SineWebPanels {
       this.#closeMenu();
       this.#closeEditor();
       this.#closePanel();
+      return;
+    }
+
+    // Same modifier as the panel numbers, on B — hide or show the rail, the
+    // binding editors use for their own sidebar.
+    if (shortcutMatches(event, this.#store.shortcutModifier) && event.code === "KeyB") {
+      event.preventDefault();
+      event.stopPropagation();
+      this.#setCollapsed(!this.#collapsed);
       return;
     }
 

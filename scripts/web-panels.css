@@ -7,6 +7,9 @@
   --sine-web-panels-offset: var(--sine-web-panels-visible-rail-size);
   --sine-web-panels-panel-offset: var(--sine-web-panels-gap);
   --sine-web-panels-resizer-width: 8px;
+  /* The strip a collapsed rail listens on. Kept narrow: it sits over the page,
+     so every pixel of it is a pixel of scrollbar the page does not get. */
+  --sine-web-panels-edge-size: 6px;
   --sine-web-panels-min-width: 320px;
   --sine-web-panels-width: 420px;
   --sine-web-panels-animation-duration: 75ms;
@@ -157,6 +160,7 @@
 }
 
 #sine-web-panels-backdrop[hidden],
+#sine-web-panels-edge[hidden],
 #sine-web-panels-resizer[hidden],
 #sine-web-panels-editor[hidden],
 #sine-web-panels-menu[hidden] {
@@ -193,6 +197,59 @@ tab[sine-web-panel-tab="true"] {
   inset-inline-start: var(--sine-web-panels-gap);
 }
 
+/* --------------------------------------------------------------------------
+   Collapsed rail + edge peek. Collapsed, the rail slides off its own side and
+   the script hands the reserved strip back to the content; the edge element
+   below is what the pointer has to reach to bring it in again.
+   -------------------------------------------------------------------------- */
+#sine-web-panels-rail {
+  transition:
+    translate var(--sine-web-panels-animation-duration) ease-out,
+    opacity var(--sine-web-panels-animation-duration) ease-out;
+}
+
+#sine-web-panels-root[collapsed] #sine-web-panels-rail {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#sine-web-panels-root[collapsed][side="right"] #sine-web-panels-rail {
+  translate: var(--sine-web-panels-visible-rail-size) 0;
+}
+
+#sine-web-panels-root[collapsed][side="left"] #sine-web-panels-rail {
+  translate: calc(-1 * var(--sine-web-panels-visible-rail-size)) 0;
+}
+
+#sine-web-panels-root[collapsed][peeking] #sine-web-panels-rail {
+  translate: 0 0;
+  opacity: 1;
+  pointer-events: auto;
+  /* Peeked, the rail floats over the page rather than over chrome, so it needs
+     a surface of its own. Opaque, not translucent: the mod refuses blur
+     everywhere else, and a see-through rail over arbitrary content is a
+     coin toss on legibility. */
+  border-radius: var(--sine-web-panels-radius);
+  background: var(--sine-web-panels-panel-base);
+  box-shadow: var(--sine-web-panels-shadow);
+}
+
+#sine-web-panels-edge {
+  position: fixed;
+  inset-block: 0;
+  width: var(--sine-web-panels-edge-size);
+  background: transparent;
+  pointer-events: auto;
+}
+
+#sine-web-panels-root[side="right"] #sine-web-panels-edge {
+  inset-inline-end: 0;
+}
+
+#sine-web-panels-root[side="left"] #sine-web-panels-edge {
+  inset-inline-start: 0;
+}
+
 #sine-web-panels-list {
   width: 100%;
   min-height: 0;
@@ -206,7 +263,8 @@ tab[sine-web-panel-tab="true"] {
 }
 
 .sine-web-panels-item,
-#sine-web-panels-add-button {
+#sine-web-panels-add-button,
+#sine-web-panels-toggle {
   appearance: none;
   box-sizing: border-box;
   width: var(--sine-web-panels-button-size);
@@ -228,10 +286,37 @@ tab[sine-web-panel-tab="true"] {
   pointer-events: auto;
 }
 
-#sine-web-panels-add-button {
+#sine-web-panels-add-button,
+#sine-web-panels-toggle {
   font-size: 0;
   font-weight: 400;
   -moz-context-properties: fill;
+}
+
+/* The two-pane glyph Zen uses for its own sidebar button, mirrored to whichever
+   side the rail is on so the icon points at the edge it hides behind. Sits a
+   step back from the panels themselves — it is chrome for the rail, not one of
+   the things on it. */
+#sine-web-panels-toggle {
+  opacity: 0.7;
+}
+
+#sine-web-panels-toggle:hover,
+#sine-web-panels-root[collapsed] #sine-web-panels-toggle {
+  opacity: 1;
+}
+
+#sine-web-panels-toggle::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  display: block;
+  background-color: currentColor;
+  mask: url("chrome://browser/skin/zen-icons/sidebar.svg") center / 16px 16px no-repeat;
+}
+
+#sine-web-panels-root[side="right"] #sine-web-panels-toggle::before {
+  mask-image: url("chrome://browser/skin/zen-icons/sidebar-right.svg");
 }
 
 #sine-web-panels-add-button::before {
@@ -244,13 +329,15 @@ tab[sine-web-panel-tab="true"] {
 }
 
 .sine-web-panels-panel-button:hover,
-#sine-web-panels-add-button:hover {
+#sine-web-panels-add-button:hover,
+#sine-web-panels-toggle:hover {
   background: var(--sine-web-panels-hover);
 }
 
 .sine-web-panels-panel-button[active],
 .sine-web-panels-panel-button:active,
-#sine-web-panels-add-button:active {
+#sine-web-panels-add-button:active,
+#sine-web-panels-toggle:active {
   background: var(--sine-web-panels-active);
 }
 
