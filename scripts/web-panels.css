@@ -760,48 +760,56 @@ tab[sine-web-panel-tab="true"] {
 }
 
 /* --------------------------------------------------------------------------
-   Panel navigation bar
-   Sits over the top edge of the panel and only appears while the panel is
-   hovered, so a panel being read shows no chrome at all.
+   Panel navigation controls
+   A small pill floating just outside the panel's outer edge, past the resize
+   handle, so it never sits over the panel's content or over Zen's toolbar.
+   Always shown while a panel is open: controls that come and go are harder
+   to trust than ones that stay put. It is positioned off the panel frame, so
+   it rides the edge during a resize instead of lagging behind it.
    -------------------------------------------------------------------------- */
 .sine-web-panels-nav {
   position: absolute;
-  inset-block-start: 0;
-  inset-inline: 0;
+  inset-block-start: 10px;
   z-index: 3;
   display: flex;
+  flex-direction: column;
   gap: 2px;
-  padding: 4px 6px;
-  opacity: 0;
-  transform: translateY(-4px);
-  transition: opacity 120ms ease-out, transform 120ms ease-out;
-  pointer-events: none;
-  background: linear-gradient(
-    to bottom,
-    color-mix(in srgb, var(--zen-themed-toolbar-bg, Field) 92%, transparent),
-    transparent
-  );
-}
-
-.browserContainer:hover > .sine-web-panels-nav,
-.sine-web-panels-nav:focus-within {
-  opacity: 1;
-  transform: none;
+  padding: 3px;
+  border-radius: 9px;
+  background: var(--zen-themed-toolbar-bg, Field);
+  color: FieldText;
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
   pointer-events: auto;
 }
 
+:root[sine-web-panels-side="right"] .sine-web-panels-nav {
+  inset-inline-end: calc(100% + var(--sine-web-panels-resizer-width) + 4px);
+}
+
+:root[sine-web-panels-side="left"] .sine-web-panels-nav {
+  inset-inline-start: calc(100% + var(--sine-web-panels-resizer-width) + 4px);
+}
+
+/* The panel owns the whole window while a video from it is fullscreen; there
+   is no edge to sit beside. */
+:root[sine-web-panels-panel-fullscreen] .sine-web-panels-nav {
+  display: none;
+}
+
 .sine-web-panels-nav-button {
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: 6px;
   background: transparent;
+  color: inherit;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 0;
-  opacity: 0.75;
+  opacity: 0.8;
   -moz-context-properties: fill;
 }
 
@@ -809,8 +817,8 @@ tab[sine-web-panel-tab="true"] {
    <button> paints its own background over a mask applied directly to it. */
 .sine-web-panels-nav-button::before {
   content: "";
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   display: block;
   background-color: currentColor;
 }
@@ -821,19 +829,23 @@ tab[sine-web-panel-tab="true"] {
 }
 
 .sine-web-panels-nav-button:disabled {
-  opacity: 0.25;
+  opacity: 0.3;
 }
 
 .sine-web-panels-nav-back::before {
-  mask: url("chrome://browser/skin/zen-icons/back.svg") center / 12px 12px no-repeat;
+  mask: url("chrome://browser/skin/zen-icons/back.svg") center / 14px 14px no-repeat;
 }
 
 .sine-web-panels-nav-forward::before {
-  mask: url("chrome://browser/skin/zen-icons/forward.svg") center / 12px 12px no-repeat;
+  mask: url("chrome://browser/skin/zen-icons/forward.svg") center / 14px 14px no-repeat;
+}
+
+.sine-web-panels-nav-reload::before {
+  mask: url("chrome://browser/skin/zen-icons/reload.svg") center / 14px 14px no-repeat;
 }
 
 .sine-web-panels-nav-home::before {
-  mask: url("chrome://browser/skin/zen-icons/home.svg") center / 12px 12px no-repeat;
+  mask: url("chrome://browser/skin/zen-icons/home.svg") center / 14px 14px no-repeat;
 }
 
 /* --------------------------------------------------------------------------

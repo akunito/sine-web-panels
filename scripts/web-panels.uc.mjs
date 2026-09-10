@@ -168,6 +168,7 @@ export class SineWebPanels {
   #restoreAfterFullscreen = null;
   #navBack;
   #navForward;
+  #navReload;
   #navHome;
 
   constructor(windowRef) {
@@ -1130,6 +1131,11 @@ export class SineWebPanels {
     }
   }
 
+  // Plain reload of wherever the panel is now; Home is the one that resets.
+  #navReloadPage() {
+    this.#activePanelBrowser()?.reload?.();
+  }
+
   // Home is also the reset: without clearing the memory the panel would drift
   // straight back on the next restart.
   #navGoHome(item = null) {
@@ -1220,10 +1226,13 @@ export class SineWebPanels {
       return this.#navBar;
     }
 
+    // Floats beside the panel's outer edge (see the CSS), a vertical stack of
+    // back / forward / home. Nothing here overlaps the panel's page.
     const bar = this.#el("div", {
       class: "sine-web-panels-nav",
       role: "toolbar",
       "aria-label": "Web panel navigation",
+      "aria-orientation": "vertical",
     });
 
     const mk = (name, label, handler) => {
@@ -1242,9 +1251,10 @@ export class SineWebPanels {
 
     this.#navBack = mk("back", "Back", () => this.#navGoBack());
     this.#navForward = mk("forward", "Forward", () => this.#navGoForward());
+    this.#navReload = mk("reload", "Reload", () => this.#navReloadPage());
     this.#navHome = mk("home", "Home (reset this panel)", () => this.#navGoHome());
 
-    bar.append(this.#navBack, this.#navForward, this.#navHome);
+    bar.append(this.#navBack, this.#navForward, this.#navReload, this.#navHome);
     this.#navBar = bar;
     this.#updateNavState();
     return bar;

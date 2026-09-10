@@ -377,3 +377,83 @@ test("a stray backing is still corrected while another panel is open", () => {
 
   assert.notEqual(app.window.gBrowser.selectedTab, stray);
 });
+
+// --------------------------------------------------------------------------
+// The navigation controls live in the panel's frame and act on its browser.
+// --------------------------------------------------------------------------
+
+function navOf(app) {
+  return app.window.gBrowser.selectedTab.linkedPanel.querySelector(".sine-web-panels-nav");
+}
+
+test("opening a panel mounts back, forward, reload and home beside it", () => {
+  const { app } = mountWithPanels(["https://mail.example/"]);
+
+  railButton(app, "panel-1").dispatch("click");
+
+  const nav = navOf(app);
+  assert.ok(nav, "the controls are in the panel frame");
+  assert.equal(nav.getAttribute("aria-orientation"), "vertical");
+  assert.deepEqual(
+    [...nav.querySelectorAll(".sine-web-panels-nav-button")].map(button => button.getAttribute("aria-label")),
+    ["Back", "Forward", "Reload", "Home (reset this panel)"]
+  );
+  assert.equal(nav.querySelector(".sine-web-panels-nav-back").disabled, true, "no history yet");
+  assert.equal(nav.querySelector(".sine-web-panels-nav-forward").disabled, true);
+});
+
+test("back and forward follow the panel browser's history", () => {
+  const { app } = mountWithPanels(["https://mail.example/"]);
+  railButton(app, "panel-1").dispatch("click");
+
+  const browser = app.window.gBrowser.selectedTab.linkedBrowser;
+  const calls = [];
+  browser.canGoBack = true;
+  browser.goBack = () => calls.push("back");
+  browser.goForward = () => calls.push("forward");
+
+  const nav = navOf(app);
+  nav.querySelector(".sine-web-panels-nav-forward").dispatch("click");
+  assert.deepEqual(calls, [], "forward is a no-op with nothing ahead");
+
+  // The buttons re-read the state after every click, so the enabled state
+  // catches up with the browser's without a separate event.
+  nav.querySelector(".sine-web-panels-nav-back").dispatch("click");
+  assert.deepEqual(calls, ["back"]);
+  assert.equal(nav.querySelector(".sine-web-panels-nav-back").disabled, false);
+});
+
+test("home reloads the panel's configured URL and forgets where it drifted to", () => {
+  const { app } = mountWithPanels(["https://mail.example/"]);
+  app.prefs.setStringPref("sine.web-panels.last-urls", JSON.stringify({ "panel-1": "https://mail.example/thread/7" }));
+  railButton(app, "panel-1").dispatch("click");
+
+  const browser = app.window.gBrowser.selectedTab.linkedBrowser;
+  const loads = [];
+  browser.loadURI = uri => loads.push(uri.spec);
+
+  navOf(app).querySelector(".sine-web-panels-nav-home").dispatch("click");
+
+  assert.deepEqual(loads, ["https://mail.example/"]);
+  assert.equal(JSON.parse(app.prefs.getStringPref("sine.web-panels.last-urls"))["panel-1"], undefined);
+});
+
+test("reload refreshes the page the panel is on, without resetting it", () => {
+  const { app } = mountWithPanels(["https://mail.example/"]);
+  app.prefs.setStringPref("sine.web-panels.last-urls", JSON.stringify({ "panel-1": "https://mail.example/thread/7" }));
+  railButton(app, "panel-1").dispatch("click");
+
+  const browser = app.window.gBrowser.selectedTab.linkedBrowser;
+  let reloads = 0;
+  browser.reload = () => (reloads += 1);
+  browser.loadURI = () => assert.fail("reload must not navigate");
+
+  navOf(app).querySelector(".sine-web-panels-nav-reload").dispatch("click");
+
+  assert.equal(reloads, 1);
+  assert.equal(
+    JSON.parse(app.prefs.getStringPref("sine.web-panels.last-urls"))["panel-1"],
+    "https://mail.example/thread/7",
+    "where the panel was is kept"
+  );
+});

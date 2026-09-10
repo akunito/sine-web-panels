@@ -111,10 +111,19 @@ export class FakeElement {
   }
 
   setAttribute(name, value) {
+    // class= and classList are one thing in a browser; the controller sets
+    // the attribute and the selectors read the list.
+    if (name === "class") {
+      this.classList.value = String(value);
+      return;
+    }
     this.attributes.set(name, String(value));
   }
 
   getAttribute(name) {
+    if (name === "class") {
+      return this.classList.value || null;
+    }
     return this.attributes.has(name) ? this.attributes.get(name) : null;
   }
 
@@ -498,6 +507,7 @@ export function createChromeWindow({ prefs = {}, viewportWidth = 1600 } = {}) {
       },
     },
     scriptSecurityManager: { getSystemPrincipal: () => "system-principal" },
+    io: { newURI: spec => ({ spec }) },
   };
 
   return {

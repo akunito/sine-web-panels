@@ -52,3 +52,35 @@ test("the accent chain ends in a colour that cannot fail to resolve", () => {
   assert.match(root, /--zen-primary-color/, "prefers Zen's own theme colour");
   assert.match(root, /AccentColor\s*\)/, "falls back to the system accent");
 });
+
+// --------------------------------------------------------------------------
+// Navigation controls: Tom's condition for merging was that the gradient
+// header over the panel's content goes. His decision (2026-09-09): a few
+// floating controls beside the panel, always there, nothing appearing and
+// disappearing.
+// --------------------------------------------------------------------------
+
+test("the navigation controls float beside the panel, not over it", () => {
+  const nav = rule(".sine-web-panels-nav");
+
+  assert.doesNotMatch(nav, /gradient/, "no gradient");
+  assert.doesNotMatch(nav, /opacity:\s*0\b/, "not hidden until hovered");
+  assert.doesNotMatch(nav, /inset-inline:\s*0/, "does not span the panel's width");
+  assert.match(nav, /flex-direction:\s*column/, "a vertical stack");
+  assert.match(nav, /background:\s*var\(--zen-themed-toolbar-bg/, "opaque, themed");
+
+  const right = rule(':root[sine-web-panels-side="right"] .sine-web-panels-nav');
+  const left = rule(':root[sine-web-panels-side="left"] .sine-web-panels-nav');
+  assert.match(right, /inset-inline-end:\s*calc\(100%/, "outside the panel's edge on the right");
+  assert.match(left, /inset-inline-start:\s*calc\(100%/, "and on the left");
+  assert.match(right, /--sine-web-panels-resizer-width/, "clear of the resize handle");
+});
+
+test("the navigation controls do not come and go with the pointer", () => {
+  assert.doesNotMatch(css, /:hover\s*>\s*\.sine-web-panels-nav/);
+});
+
+test("the navigation controls leave when a panel's video goes fullscreen", () => {
+  const fullscreen = rule(":root[sine-web-panels-panel-fullscreen] .sine-web-panels-nav");
+  assert.match(fullscreen, /display:\s*none/);
+});
