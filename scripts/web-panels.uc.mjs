@@ -97,6 +97,7 @@ const FULLSCREEN_ATTRIBUTES = ["inFullscreen", "inDOMFullscreen"];
 // Zen stamps this on the chrome root when its sidebar sits on the right.
 const ZEN_SIDEBAR_SIDE_ATTRIBUTE = "zen-right-side";
 
+
 function isPanel(item) {
   return item?.type === PANEL_TYPE;
 }
@@ -1651,15 +1652,6 @@ class SineWebPanels {
         this.#render();
       }],
       ["New Web Panel", () => this.#openEditor({ mode: "add", anchor: this.#rail, insertIndex: this.#railInsertIndex })],
-      ["separator"],
-      ["Hide the rail", () => this.#setCollapsed(true)],
-      [
-        "Reset handle colour",
-        () => {
-          this.#store.resizerColor = "";
-        },
-        !this.#store.resizerColor,
-      ],
     ]);
   };
 

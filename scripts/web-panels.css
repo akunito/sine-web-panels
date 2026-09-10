@@ -7,6 +7,11 @@
   --sine-web-panels-offset: var(--sine-web-panels-visible-rail-size);
   --sine-web-panels-panel-offset: var(--sine-web-panels-gap);
   --sine-web-panels-resizer-width: 8px;
+  /* The visible mark on the handle. Half again as wide once it is live, so
+     "you can grab this" is legible at a glance rather than on inspection. */
+  --sine-web-panels-resizer-line: 2px;
+  --sine-web-panels-resizer-line-active: 3px;
+  --sine-web-panels-resizer-line-dragging: 4px;
   /* The strip a collapsed rail listens on. Kept narrow: it sits over the page,
      so every pixel of it is a pixel of scrollbar the page does not get. */
   --sine-web-panels-edge-size: 6px;
@@ -436,8 +441,8 @@ tab[sine-web-panel-tab="true"] {
   content: "";
   position: absolute;
   inset-block: 0;
-  width: 2px;
-  border-radius: 2px;
+  width: var(--sine-web-panels-resizer-line);
+  border-radius: var(--sine-web-panels-resizer-line);
   background: var(--sine-web-panels-accent);
   box-shadow: 0 0 6px color-mix(in srgb, var(--sine-web-panels-accent) 65%, transparent);
   opacity: 0;
@@ -476,13 +481,17 @@ tab[sine-web-panel-tab="true"] {
 #sine-web-panels-resizer:hover::before,
 :root[sine-web-panels-resizer-hover="true"] #sine-web-panels-resizer::before,
 :root:has(#sine-web-panels-root[resizing]) #sine-web-panels-resizer::before {
+  width: var(--sine-web-panels-resizer-line-active);
+  border-radius: var(--sine-web-panels-resizer-line-active);
   opacity: 1;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--sine-web-panels-accent) 75%, transparent);
 }
 
 /* Grabbed, not just pointed at. */
 :root:has(#sine-web-panels-root[resizing]) #sine-web-panels-resizer::before {
-  width: 3px;
-  box-shadow: 0 0 12px color-mix(in srgb, var(--sine-web-panels-accent) 80%, transparent);
+  width: var(--sine-web-panels-resizer-line-dragging);
+  border-radius: var(--sine-web-panels-resizer-line-dragging);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--sine-web-panels-accent) 85%, transparent);
 }
 
 .browserSidebarContainer.sine-web-panels-parent-background {

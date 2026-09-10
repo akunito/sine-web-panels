@@ -6,13 +6,6 @@
     "defaultValue": true
   },
   {
-    "type": "string",
-    "label": "Panel width",
-    "property": "sine.web-panels.width",
-    "defaultValue": "420",
-    "placeholder": "420"
-  },
-  {
     "type": "dropdown",
     "label": "Panel shortcut",
     "property": "sine.web-panels.shortcut-modifier",
