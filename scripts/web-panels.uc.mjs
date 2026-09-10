@@ -7,6 +7,7 @@ import {
   clampWebPanelWidth,
   normalizeWebPanelUrl,
   normalizeResizerColor,
+  webPanelSideForSidebar,
   panelMaxWidthFromViewport,
   parseWebPanelUnreadCount,
 } from "./web-panels-store.uc.mjs";
@@ -93,6 +94,9 @@ const PEEK_OUT_DELAY = 320;
 // rather than guessing at event names keeps this working across Zen versions.
 const FULLSCREEN_ATTRIBUTES = ["inFullscreen", "inDOMFullscreen"];
 
+// Zen stamps this on the chrome root when its sidebar sits on the right.
+const ZEN_SIDEBAR_SIDE_ATTRIBUTE = "zen-right-side";
+
 function isPanel(item) {
   return item?.type === PANEL_TYPE;
 }
@@ -154,6 +158,7 @@ class SineWebPanels {
   #peekTimer = null;
   #fullscreen = false;
   #fullscreenObserver;
+  #sidebarSideObserver;
   #restoreAfterFullscreen = null;
   #navBack;
   #navForward;
@@ -185,6 +190,8 @@ class SineWebPanels {
     this.#abortController.abort();
     this.#fullscreenObserver?.disconnect();
     this.#fullscreenObserver = null;
+    this.#sidebarSideObserver?.disconnect();
+    this.#sidebarSideObserver = null;
     if (this.#closeTimer) {
       this.window.clearTimeout(this.#closeTimer);
       this.#closeTimer = null;
@@ -327,6 +334,7 @@ class SineWebPanels {
     this.window.gBrowser?.tabContainer?.addEventListener("TabClose", this.#onTabClose, { signal });
     this.window.gBrowser?.tabContainer?.addEventListener("TabAttrModified", this.#onTabAttrModified, { signal });
     this.#observeFullscreen();
+    this.#observeSidebarSide();
     this.#applyResizerColor();
     this.#applyCollapsedState(this.#store.collapsed);
     this.#render();
@@ -574,6 +582,42 @@ class SineWebPanels {
       (this.#finder && !this.#finder.hidden) ||
       this.#editorState
     );
+  }
+
+  // The rail takes whichever side Zen's sidebar is not on, and Zen lets that be
+  // changed at runtime. Nothing re-read it: the side is applied at mount, in
+  // #render and in #syncChromeLayout, and none of those runs when the sidebar
+  // moves — so the two ended up stacked on the same side until the next
+  // restart. Same MutationObserver pattern as fullscreen, for the same reason:
+  // the attribute is what the layout actually keys off.
+  #observeSidebarSide() {
+    this.#sidebarSideObserver = new this.window.MutationObserver(() =>
+      this.#applyPlacementSide()
+    );
+    this.#sidebarSideObserver.observe(this.document.documentElement, {
+      attributes: true,
+      attributeFilter: [ZEN_SIDEBAR_SIDE_ATTRIBUTE],
+    });
+  }
+
+  #applyPlacementSide() {
+    if (!this.#root) {
+      return;
+    }
+
+    const side = this.#placementSide();
+    // The DOM is the cache — no point re-running the layout for an attribute
+    // that was rewritten with the value it already had.
+    if (this.#root.getAttribute("side") === side) {
+      return;
+    }
+
+    this.#root.setAttribute("side", side);
+    // Swaps the reserved margin from one side to the other; everything else —
+    // the rail, the panel overlay, the resizer — is keyed off the attributes
+    // this sets.
+    this.#syncChromeLayout();
+    this.#syncDisplayWidth();
   }
 
   // The rail is browser chrome, so it has no business sitting on top of a
@@ -2035,7 +2079,9 @@ class SineWebPanels {
   }
 
   #placementSide() {
-    return this.document.documentElement.getAttribute("zen-right-side") === "true" ? "left" : "right";
+    return webPanelSideForSidebar(
+      this.document.documentElement.getAttribute(ZEN_SIDEBAR_SIDE_ATTRIBUTE)
+    );
   }
 
   #currentTabUrl() {

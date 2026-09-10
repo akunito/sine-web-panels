@@ -112,6 +112,14 @@ const COLOR_PATTERNS = Object.freeze([
   new RegExp(`^(?:${COLOR_FUNCTIONS})\\([0-9a-z%.,\\s/+-]*\\)$`, "i"),
 ]);
 
+// Zen stamps :root[zen-right-side="true"] when its sidebar is on the right, and
+// the rail takes the side the sidebar is NOT on. The inversion is the whole
+// point and is easy to get backwards in a refactor, so it lives here where a
+// test can hold it still.
+export function webPanelSideForSidebar(zenRightSide) {
+  return String(zenRightSide) === "true" ? "left" : "right";
+}
+
 export function normalizeResizerColor(value) {
   const trimmed = String(value ?? "").trim();
   if (!trimmed) {

@@ -13,6 +13,7 @@ const {
   panelMaxWidthFromViewport,
   parseWebPanelUnreadCount,
   titleFromUrl,
+  webPanelSideForSidebar,
 } = await import("../web-panels-store.uc.mjs");
 
 test("normalizeWebPanelUrl accepts only http and https URLs", () => {
@@ -204,4 +205,27 @@ test("a rejected colour is indistinguishable from unset, so the theme wins", () 
   // Both paths end at "", which is what makes the reset a real reset: the
   // caller removes the custom property and the stylesheet chain takes over.
   assert.equal(normalizeResizerColor("nonsense{}"), normalizeResizerColor(""));
+});
+
+// --------------------------------------------------------------------------
+// The rail takes the side Zen's sidebar is NOT on. The inversion reads
+// backwards at a glance, which is exactly why it is pinned.
+// --------------------------------------------------------------------------
+
+test("the rail sits opposite Zen's sidebar", () => {
+  assert.equal(webPanelSideForSidebar("true"), "left", "sidebar right, rail left");
+  assert.equal(webPanelSideForSidebar("false"), "right", "sidebar left, rail right");
+});
+
+test("no sidebar attribute means Zen's default, so the rail goes right", () => {
+  assert.equal(webPanelSideForSidebar(null), "right");
+  assert.equal(webPanelSideForSidebar(undefined), "right");
+  assert.equal(webPanelSideForSidebar(""), "right");
+});
+
+test("only the exact attribute value flips the rail", () => {
+  // Zen writes the string "true"; anything else is not a sidebar on the right.
+  for (const value of ["TRUE", "1", "yes", "right", true]) {
+    assert.equal(webPanelSideForSidebar(value), value === true ? "left" : "right", String(value));
+  }
 });
