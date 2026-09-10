@@ -19,6 +19,16 @@
     transparent
   );
   --sine-web-panels-border: color-mix(in srgb, currentColor 14%, transparent);
+  /* The resize handle's colour. Follows Zen's theme where Zen exposes it, then
+     the browser theme, then the system — an invisible handle is the whole bug
+     this exists to fix, so the chain must not be able to end in nothing. */
+  --sine-web-panels-accent: var(
+    --zen-primary-color,
+    var(
+      --zen-colors-primary,
+      var(--toolbarbutton-icon-fill-attention, var(--focus-outline-color, AccentColor))
+    )
+  );
   --sine-web-panels-radius: var(--zen-native-inner-radius, 12px);
   --sine-web-panels-shadow: var(
     --zen-big-shadow,
@@ -411,22 +421,31 @@ tab[sine-web-panel-tab="true"] {
   z-index: 2147483647;
   cursor: ew-resize;
   background: transparent;
-  pointer-events: none;
+  /* Must stay `auto`. The handle straddles the panel's edge, and both sides of
+     it are remote content — chrome sees no pointer moves over that, so the
+     JS-driven hover state alone almost never fires and the affordance never
+     appeared. Hit-testing this element is what makes :hover and the ew-resize
+     cursor work at all. */
+  pointer-events: auto;
   transform: translateX(-50%);
 }
 
+/* The line itself: full height, so the edge of the panel lights up rather than
+   a stub in the middle of it. */
 #sine-web-panels-resizer::before {
   content: "";
   position: absolute;
-  top: 50%;
+  inset-block: 0;
   width: 2px;
-  height: 50px;
   border-radius: 2px;
-  background: color-mix(in srgb, AccentColor 75%, transparent);
+  background: var(--sine-web-panels-accent);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--sine-web-panels-accent) 65%, transparent);
   opacity: 0;
   pointer-events: none;
-  transform: translateY(-50%);
-  transition: opacity 80ms ease-in-out;
+  transition:
+    opacity 80ms ease-in-out,
+    width 80ms ease-in-out,
+    box-shadow 80ms ease-in-out;
 }
 
 :root[sine-web-panels-side="right"] #sine-web-panels-resizer {
@@ -458,6 +477,12 @@ tab[sine-web-panel-tab="true"] {
 :root[sine-web-panels-resizer-hover="true"] #sine-web-panels-resizer::before,
 :root:has(#sine-web-panels-root[resizing]) #sine-web-panels-resizer::before {
   opacity: 1;
+}
+
+/* Grabbed, not just pointed at. */
+:root:has(#sine-web-panels-root[resizing]) #sine-web-panels-resizer::before {
+  width: 3px;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--sine-web-panels-accent) 80%, transparent);
 }
 
 .browserSidebarContainer.sine-web-panels-parent-background {

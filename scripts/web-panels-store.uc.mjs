@@ -92,7 +92,34 @@ const PREFS = Object.freeze({
   shortcutModifier: "sine.web-panels.shortcut-modifier",
   lastUrls: "sine.web-panels.last-urls",
   lastTitles: "sine.web-panels.last-titles",
+  resizerColor: "sine.web-panels.resizer-color",
 });
+
+// The resize handle's colour is the one setting that becomes CSS, so it is
+// validated rather than trusted. Empty means "follow the theme", which is the
+// default and the way back from any custom value.
+//
+// Hex and bare identifiers cover named colours; the functional forms are
+// allowed with a deliberately narrow character set. No quotes, semicolons,
+// braces or url() get through, so nothing here can escape the declaration it
+// is written into.
+const COLOR_FUNCTIONS = "rgba?|hsla?|hwb|lab|lch|oklab|oklch";
+const COLOR_PATTERNS = Object.freeze([
+  /^#[0-9a-f]{3,4}$/i,
+  /^#[0-9a-f]{6}$/i,
+  /^#[0-9a-f]{8}$/i,
+  /^[a-z]+$/i,
+  new RegExp(`^(?:${COLOR_FUNCTIONS})\\([0-9a-z%.,\\s/+-]*\\)$`, "i"),
+]);
+
+export function normalizeResizerColor(value) {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  return COLOR_PATTERNS.some(pattern => pattern.test(trimmed)) ? trimmed : "";
+}
 
 // "accel" is the platform's primary modifier: Cmd on macOS, Ctrl elsewhere —
 // the same concept Gecko uses for key elements, so a single setting is correct
@@ -244,6 +271,15 @@ export class WebPanelsStore {
   set width(value) {
     const width = Math.max(MIN_PANEL_WIDTH, Math.round(Number(value) || DEFAULT_PANEL_WIDTH));
     setStringPref(PREFS.width, String(width));
+  }
+
+  // "" means the accent falls back to its theme chain in the stylesheet.
+  get resizerColor() {
+    return normalizeResizerColor(readStringPref(PREFS.resizerColor, ""));
+  }
+
+  set resizerColor(value) {
+    setStringPref(PREFS.resizerColor, normalizeResizerColor(value));
   }
 
   get shortcutModifier() {

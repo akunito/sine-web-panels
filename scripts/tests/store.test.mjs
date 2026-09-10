@@ -6,6 +6,7 @@ const {
   clampWebPanelWidth,
   formatWebPanelUnreadCount,
   MIN_PANEL_WIDTH,
+  normalizeResizerColor,
   normalizeWebPanelUrl,
   PANEL_VIEWPORT_INSET,
   PANEL_VIEWPORT_MAX_WIDTH_RATIO,
@@ -149,4 +150,58 @@ test("a good measurement still yields a maximum", () => {
     panelMaxWidthFromViewport(rect, WINDOW),
     Math.floor(1600 * PANEL_VIEWPORT_MAX_WIDTH_RATIO)
   );
+});
+
+// --------------------------------------------------------------------------
+// The resize handle colour is the only setting that becomes CSS, so it is
+// validated rather than trusted. Anything rejected becomes "", which is also
+// the default and the way back: empty lets the stylesheet's theme chain win.
+// --------------------------------------------------------------------------
+
+test("resizer colour accepts the notations a person would actually type", () => {
+  for (const value of [
+    "#abc",
+    "#abcd",
+    "#3b82f6",
+    "#3b82f680",
+    "rebeccapurple",
+    "AccentColor",
+    "rgb(59 130 246)",
+    "rgba(59, 130, 246, 0.5)",
+    "hsl(217 91% 60%)",
+    "oklch(0.7 0.2 250)",
+  ]) {
+    assert.equal(normalizeResizerColor(value), value, value);
+  }
+});
+
+test("resizer colour trims, and treats blank as the default", () => {
+  assert.equal(normalizeResizerColor("  #3b82f6  "), "#3b82f6");
+  assert.equal(normalizeResizerColor(""), "");
+  assert.equal(normalizeResizerColor("   "), "");
+  assert.equal(normalizeResizerColor(null), "");
+  assert.equal(normalizeResizerColor(undefined), "");
+});
+
+test("resizer colour refuses anything that could escape the declaration", () => {
+  for (const value of [
+    "red; background: url(http://example.com/x)",
+    "red}",
+    "}",
+    "url(http://example.com/x)",
+    "var(--something-else)",
+    "#12345",
+    "#gggggg",
+    "expression(alert(1))",
+    "rgb(0,0,0);--x:y",
+    'rgb(0,0,0)"',
+  ]) {
+    assert.equal(normalizeResizerColor(value), "", value);
+  }
+});
+
+test("a rejected colour is indistinguishable from unset, so the theme wins", () => {
+  // Both paths end at "", which is what makes the reset a real reset: the
+  // caller removes the custom property and the stylesheet chain takes over.
+  assert.equal(normalizeResizerColor("nonsense{}"), normalizeResizerColor(""));
 });

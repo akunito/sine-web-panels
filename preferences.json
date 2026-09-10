@@ -44,5 +44,16 @@
         "label": "Alt / ⌥ + Shift + 1…0"
       }
     ]
+  },
+  {
+    "type": "separator",
+    "label": "Appearance"
+  },
+  {
+    "type": "string",
+    "label": "Resize handle colour — leave empty to follow the browser theme",
+    "property": "sine.web-panels.resizer-color",
+    "defaultValue": "",
+    "placeholder": "#3b82f6, rebeccapurple, oklch(0.7 0.2 250)…"
   }
 ]

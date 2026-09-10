@@ -42,6 +42,9 @@ The mod is currently Zen-only. Other Firefox-family browsers would need a separa
 ## Preferences
 
 - `sine.web-panels.enabled`: enables or disables the rail.
+- `sine.web-panels.resizer-color`: colour of the resize handle. Empty follows
+  the browser theme, which is the default and the way back — `Reset handle
+  colour` in the rail context menu clears it.
 - `sine.web-panels.collapsed`: how the rail was last left. Collapsing is
   per-window; this only seeds new windows and the next session. Not the same as
   disabling the rail — collapsed, every panel stays loaded.

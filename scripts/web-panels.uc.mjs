@@ -6,6 +6,7 @@ import {
   WebPanelsStore,
   clampWebPanelWidth,
   normalizeWebPanelUrl,
+  normalizeResizerColor,
   panelMaxWidthFromViewport,
   parseWebPanelUnreadCount,
 } from "./web-panels-store.uc.mjs";
@@ -196,6 +197,7 @@ class SineWebPanels {
     }
     if (this.#prefObserver) {
       Services.prefs.removeObserver(WebPanelsStore.prefs.enabled, this.#prefObserver);
+      Services.prefs.removeObserver(WebPanelsStore.prefs.resizerColor, this.#prefObserver);
     }
     if (this.#tabsProgressListener) {
       this.window.gBrowser?.removeTabsProgressListener?.(this.#tabsProgressListener);
@@ -203,6 +205,7 @@ class SineWebPanels {
     }
     this.#runtime?.destroy();
     this.#resetChromeLayout();
+    this.document?.documentElement?.style.removeProperty("--sine-web-panels-accent");
     this.#editor?.remove();
     this.#tabContextMenuItem?.remove();
     this.#finder?.remove();
@@ -324,6 +327,7 @@ class SineWebPanels {
     this.window.gBrowser?.tabContainer?.addEventListener("TabClose", this.#onTabClose, { signal });
     this.window.gBrowser?.tabContainer?.addEventListener("TabAttrModified", this.#onTabAttrModified, { signal });
     this.#observeFullscreen();
+    this.#applyResizerColor();
     this.#applyCollapsedState(this.#store.collapsed);
     this.#render();
 
@@ -363,6 +367,8 @@ class SineWebPanels {
         }
         if (prefName === WebPanelsStore.prefs.enabled) {
           this.#applyEnabledState();
+        } else if (prefName === WebPanelsStore.prefs.resizerColor) {
+          this.#applyResizerColor();
         }
       },
     };
@@ -370,6 +376,8 @@ class SineWebPanels {
     // merely persisted, so hiding the rail in one window must not travel to
     // the others.
     Services.prefs.addObserver(WebPanelsStore.prefs.enabled, this.#prefObserver);
+    // Unlike `collapsed`, this one is appearance and belongs to every window.
+    Services.prefs.addObserver(WebPanelsStore.prefs.resizerColor, this.#prefObserver);
   }
 
   #applyEnabledState() {
@@ -489,6 +497,24 @@ class SineWebPanels {
     this.#updateToggleLabel();
     this.#syncChromeLayout();
     this.#syncDisplayWidth();
+  }
+
+  // The handle sits outside #sine-web-panels-root, in the panel frame, so the
+  // override goes on the document root like --sine-web-panels-width does.
+  // Removing it lets the stylesheet's theme chain take over again, which is
+  // what makes "empty" a working reset rather than a blank colour.
+  #applyResizerColor() {
+    const color = this.#store.resizerColor;
+    const root = this.document?.documentElement;
+    if (!root) {
+      return;
+    }
+
+    if (color) {
+      root.style.setProperty("--sine-web-panels-accent", color);
+    } else {
+      root.style.removeProperty("--sine-web-panels-accent");
+    }
   }
 
   #updateToggleLabel() {
@@ -1583,6 +1609,13 @@ class SineWebPanels {
       ["New Web Panel", () => this.#openEditor({ mode: "add", anchor: this.#rail, insertIndex: this.#railInsertIndex })],
       ["separator"],
       ["Hide the rail", () => this.#setCollapsed(true)],
+      [
+        "Reset handle colour",
+        () => {
+          this.#store.resizerColor = "";
+        },
+        !this.#store.resizerColor,
+      ],
     ]);
   };
 
