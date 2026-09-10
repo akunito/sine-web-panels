@@ -27,6 +27,8 @@ Version `0.4.0` is Zen-only. It uses Zen-managed hidden tabs and Zen browser con
 - Spacer items with move/delete context menu.
 - Drag reorder across panels and spacers.
 - Unread count badge from title prefixes such as `(3) Inbox` or `[3] Inbox`.
+- Panel tabs are reclaimed after a browser restart rather than coming back as
+  ordinary tabs, using a session-store marker that survives one.
 - Clean Sine unload handling for DOM, listeners, and live managed panel tabs.
 
 ## Install

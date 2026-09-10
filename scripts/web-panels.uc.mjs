@@ -94,6 +94,9 @@ const PEEK_OUT_DELAY = 320;
 // rather than guessing at event names keeps this working across Zen versions.
 const FULLSCREEN_ATTRIBUTES = ["inFullscreen", "inDOMFullscreen"];
 
+// Fired once the session's windows and their tabs are back.
+const SESSION_RESTORED_TOPIC = "sessionstore-windows-restored";
+
 // Zen stamps this on the chrome root when its sidebar sits on the right.
 const ZEN_SIDEBAR_SIDE_ATTRIBUTE = "zen-right-side";
 
@@ -143,6 +146,7 @@ class SineWebPanels {
   #ignoreOutsideClicksUntil = 0;
   #abortController = new AbortController();
   #prefObserver;
+  #sessionRestoreObserver;
   #resizeState = null;
   #resizeHovering = false;
   #dragState = null;
@@ -177,6 +181,8 @@ class SineWebPanels {
     this.#runtime = new WebPanelsRuntime(this.window);
     this.#applyEnabledState();
     this.#observePrefs();
+    this.#adoptRestoredPanelTabs();
+    this.#observeSessionRestore();
   }
 
   destroyExistingRoot() {
@@ -202,6 +208,10 @@ class SineWebPanels {
     if (this.#peekTimer) {
       this.window.clearTimeout(this.#peekTimer);
       this.#peekTimer = null;
+    }
+    if (this.#sessionRestoreObserver) {
+      Services.obs.removeObserver(this.#sessionRestoreObserver, SESSION_RESTORED_TOPIC);
+      this.#sessionRestoreObserver = null;
     }
     if (this.#prefObserver) {
       Services.prefs.removeObserver(WebPanelsStore.prefs.enabled, this.#prefObserver);
@@ -366,6 +376,33 @@ class SineWebPanels {
       signal: this.#abortController.signal,
     });
     this.#tabContextMenuItem = menuItem;
+  }
+
+  // Panel tabs are ordinary tabs as far as session restore is concerned, so a
+  // restart hands them back — visible, unclaimed, and about to be duplicated by
+  // the first panel that opens. Claim them before that happens.
+  //
+  // Run twice on purpose. A cold start reaches here before restore has
+  // finished, so the observer catches it; a mod hot-loaded into a window that
+  // is already up has missed that notification entirely, so the call in init
+  // catches that. Both are idempotent.
+  #adoptRestoredPanelTabs() {
+    if (!this.#runtime || !this.#store.enabled) {
+      return;
+    }
+
+    const { adopted, swept } = this.#runtime.adoptRestoredTabs(this.#items);
+    if (adopted.length || swept.length) {
+      console.log(
+        `[Web Panels] Reclaimed ${adopted.length} restored panel tab(s), ` +
+          `removed ${swept.length} with no panel left to open them.`
+      );
+    }
+  }
+
+  #observeSessionRestore() {
+    this.#sessionRestoreObserver = { observe: () => this.#adoptRestoredPanelTabs() };
+    Services.obs.addObserver(this.#sessionRestoreObserver, SESSION_RESTORED_TOPIC);
   }
 
   #observePrefs() {
