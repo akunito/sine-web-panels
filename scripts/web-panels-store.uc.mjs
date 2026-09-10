@@ -9,6 +9,7 @@ const PREFS = Object.freeze({
   items: "sine.web-panels.items",
   shortcutModifier: "sine.web-panels.shortcut-modifier",
   lastUrls: "sine.web-panels.last-urls",
+  lastTitles: "sine.web-panels.last-titles",
 });
 
 // "accel" is the platform's primary modifier: Cmd on macOS, Ctrl elsewhere —
@@ -116,6 +117,9 @@ function sanitizeItem(item) {
     type: PANEL_TYPE,
     id,
     title: typeof item.title === "string" && item.title.trim() ? item.title.trim() : titleFromUrl(url),
+    // A name the user typed, kept apart from `title` so that re-deriving the
+    // title from the URL can never silently discard it.
+    name: typeof item.name === "string" && item.name.trim() ? item.name.trim() : undefined,
     url,
   };
 }
@@ -205,6 +209,43 @@ export class WebPanelsStore {
     this.lastUrls = next;
   }
 
+  // Panels are titled by hostname ("mail.google.com"), which is not what anyone
+  // searches for. Remember the page's own title so the finder can match "gmail".
+  get lastTitles() {
+    try {
+      const parsed = JSON.parse(readStringPref(PREFS.lastTitles, "{}"));
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  set lastTitles(value) {
+    setStringPref(PREFS.lastTitles, JSON.stringify(value ?? {}));
+  }
+
+  rememberTitle(id, title) {
+    const clean = (title ?? "").trim();
+    if (!id || !clean) {
+      return;
+    }
+    const next = this.lastTitles;
+    if (next[id] === clean) {
+      return;
+    }
+    next[id] = clean;
+    this.lastTitles = next;
+  }
+
+  forgetTitle(id) {
+    const next = this.lastTitles;
+    if (!(id in next)) {
+      return;
+    }
+    delete next[id];
+    this.lastTitles = next;
+  }
+
   get items() {
     return this.loadItems();
   }
@@ -233,7 +274,7 @@ export class WebPanelsStore {
     return sanitized;
   }
 
-  createPanel(rawUrl) {
+  createPanel(rawUrl, name = "") {
     const url = normalizeWebPanelUrl(rawUrl);
     if (!url) {
       return null;
@@ -242,6 +283,7 @@ export class WebPanelsStore {
       type: PANEL_TYPE,
       id: generateId("panel"),
       title: titleFromUrl(url),
+      name: name.trim() || undefined,
       url,
     };
   }
@@ -261,7 +303,7 @@ export class WebPanelsStore {
     return nextItems;
   }
 
-  updatePanel(id, rawUrl) {
+  updatePanel(id, rawUrl, name = null) {
     const url = normalizeWebPanelUrl(rawUrl);
     if (!url) {
       return null;
@@ -276,6 +318,7 @@ export class WebPanelsStore {
     nextItems[index] = {
       ...nextItems[index],
       title: titleFromUrl(url),
+      name: name === null ? nextItems[index].name : (name.trim() || undefined),
       url,
     };
     this.items = nextItems;

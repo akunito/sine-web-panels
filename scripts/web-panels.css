@@ -698,3 +698,135 @@ tab[sine-web-panel-tab="true"] {
 .sine-web-panels-nav-home::before {
   mask: url("chrome://browser/skin/zen-icons/home.svg") center / 12px 12px no-repeat;
 }
+
+/* --------------------------------------------------------------------------
+   Panel finder — a filter over the rail. Opened with the panel shortcut
+   modifier + P; searches every configured panel, not just loaded ones.
+   -------------------------------------------------------------------------- */
+#sine-web-panels-finder {
+  position: fixed;
+  z-index: 10001;
+  inset-block-start: var(--sine-web-panels-gap);
+  width: 320px;
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 10px;
+  background: var(--zen-themed-toolbar-bg, Field);
+  color: FieldText;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+#sine-web-panels-finder[hidden] {
+  display: none;
+}
+
+:root[sine-web-panels-side="right"] #sine-web-panels-finder {
+  inset-inline-end: calc(var(--sine-web-panels-rail-size) + var(--sine-web-panels-gap) * 2);
+}
+
+:root[sine-web-panels-side="left"] #sine-web-panels-finder {
+  inset-inline-start: calc(var(--sine-web-panels-rail-size) + var(--sine-web-panels-gap) * 2);
+}
+
+#sine-web-panels-finder > input {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  background: transparent;
+  color: inherit;
+}
+
+.sine-web-panels-finder-list {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sine-web-panels-finder-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: start;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sine-web-panels-finder-row:hover {
+  background: var(--sine-web-panels-hover);
+}
+
+/* The keyboard selection has to read differently from a mouse hover, otherwise
+   arrowing through the list looks like nothing is happening. */
+.sine-web-panels-finder-row[selected] {
+  background: var(--sine-web-panels-active, var(--sine-web-panels-hover));
+  outline: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  outline-offset: -1px;
+}
+
+.sine-web-panels-finder-row .sine-web-panels-favicon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+/* Finder group headers: web panels first, then one per space. */
+.sine-web-panels-finder-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 4px;
+  font-size: 0.75em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.6;
+  position: sticky;
+  inset-block-start: 0;
+  background: var(--zen-themed-toolbar-bg, Field);
+}
+
+.sine-web-panels-finder-group-icon {
+  font-size: 1.1em;
+  opacity: 0.9;
+}
+
+.sine-web-panels-finder-group-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The open-a-new-page fallback reads as an action, not a result. */
+.sine-web-panels-finder-open {
+  font-style: italic;
+  opacity: 0.85;
+}
+
+/* Folder breadcrumb on a finder row: the space is the group header, so the row
+   only needs to add the folder to complete Space / Folder / tab. */
+.sine-web-panels-finder-folder {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.55;
+}
+
+.sine-web-panels-finder-folder::after {
+  content: " / ";
+  opacity: 0.7;
+}
+
+.sine-web-panels-finder-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
