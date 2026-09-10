@@ -7,7 +7,19 @@ const PREFS = Object.freeze({
   enabled: "sine.web-panels.enabled",
   width: "sine.web-panels.width",
   items: "sine.web-panels.items",
+  shortcutModifier: "sine.web-panels.shortcut-modifier",
 });
+
+export const SHORTCUT_MODIFIERS = Object.freeze([
+  "disabled",
+  "ctrl",
+  "ctrl+alt",
+  "ctrl+shift",
+  "alt",
+  "alt+shift",
+]);
+
+export const DEFAULT_SHORTCUT_MODIFIER = "ctrl+alt";
 
 function generateId(prefix = "item") {
   if (globalThis.crypto?.randomUUID) {
@@ -119,6 +131,18 @@ export class WebPanelsStore {
   set width(value) {
     const width = Math.max(MIN_PANEL_WIDTH, Math.round(Number(value) || DEFAULT_PANEL_WIDTH));
     setStringPref(PREFS.width, String(width));
+  }
+
+  get shortcutModifier() {
+    const value = readStringPref(PREFS.shortcutModifier, DEFAULT_SHORTCUT_MODIFIER);
+    return SHORTCUT_MODIFIERS.includes(value) ? value : DEFAULT_SHORTCUT_MODIFIER;
+  }
+
+  set shortcutModifier(value) {
+    setStringPref(
+      PREFS.shortcutModifier,
+      SHORTCUT_MODIFIERS.includes(value) ? value : DEFAULT_SHORTCUT_MODIFIER
+    );
   }
 
   get items() {
