@@ -4,7 +4,9 @@ import {
   PANEL_TYPE,
   SEPARATOR_TYPE,
   WebPanelsStore,
+  clampWebPanelWidth,
   normalizeWebPanelUrl,
+  panelMaxWidthFromViewport,
   parseWebPanelUnreadCount,
 } from "./web-panels-store.uc.mjs";
 
@@ -229,8 +231,7 @@ class SineWebPanels {
       id: ROOT_ID,
       side: this.#placementSide(),
     });
-    this.#root.style.setProperty("--sine-web-panels-width", `${this.#store.width}px`);
-    this.document.documentElement.style.setProperty("--sine-web-panels-width", `${this.#store.width}px`);
+    this.#syncDisplayWidth();
 
     this.#backdrop = this.#el("div", { id: BACKDROP_ID, hidden: "true" });
     this.#resizer = this.#el("div", {
@@ -487,6 +488,7 @@ class SineWebPanels {
     this.#edge.hidden = !collapsed;
     this.#updateToggleLabel();
     this.#syncChromeLayout();
+    this.#syncDisplayWidth();
   }
 
   #updateToggleLabel() {
@@ -1778,19 +1780,57 @@ class SineWebPanels {
   }
 
   #clampWidth(width) {
-    const railRect = this.#rail.getBoundingClientRect();
-    const gap = Number.parseFloat(this.window.getComputedStyle(this.#root).getPropertyValue("--sine-web-panels-gap")) || 8;
-    const max = Math.max(MIN_PANEL_WIDTH, this.window.innerWidth - railRect.width - gap * 3);
-    return Math.min(max, Math.max(MIN_PANEL_WIDTH, Math.round(width)));
+    const maxWidth = this.#panelMaxWidth();
+    if (maxWidth === null) {
+      // Unmeasurable. Apply the floor and nothing else — inventing a maximum
+      // is what put the panel over Zen's sidebar in the first place.
+      return Math.max(MIN_PANEL_WIDTH, Math.round(Number(width) || MIN_PANEL_WIDTH));
+    }
+
+    return clampWebPanelWidth(width, maxWidth);
   }
 
-  #onWindowResize = () => {
-    // Clamp for DISPLAY only. Persisting here means a temporarily narrow
-    // window (a smaller screen, a tiled layout) permanently shrinks the width
-    // the user chose, with no way back once the window grows again.
+  // How wide the panel may get, measured from the content container rather
+  // than from window.innerWidth — innerWidth is the whole chrome window and
+  // knows nothing about the sidebar Zen paints inside it.
+  //
+  // Deliberately NOT measured from the selected tab's browser: this mod
+  // selects the hidden PANEL tab while a panel is open, so that browser is the
+  // panel itself and the measurement would be reading back its own output. The
+  // content container is the box #syncChromeLayout already reserves against,
+  // it is laid out with the chrome rather than with a tab, and it is the same
+  // element whichever tab happens to be selected.
+  #panelMaxWidth() {
+    let rect = null;
+    try {
+      rect = this.#findContentContainer()?.getBoundingClientRect?.() ?? null;
+    } catch (error) {
+      console.error("[Web Panels] Could not measure the page viewport.", error);
+    }
+
+    return panelMaxWidthFromViewport(rect, {
+      top: 0,
+      left: 0,
+      width: this.document.documentElement.clientWidth || this.window.innerWidth,
+      height: this.document.documentElement.clientHeight || this.window.innerHeight,
+    });
+  }
+
+  // Clamp for DISPLAY only. Persisting here means a temporarily narrow window
+  // (a smaller screen, a tiled layout) permanently shrinks the width the user
+  // chose, with no way back once the window grows again.
+  #syncDisplayWidth() {
+    if (!this.#root) {
+      return;
+    }
+
     const width = this.#clampWidth(this.#store.width);
     this.#root.style.setProperty("--sine-web-panels-width", `${width}px`);
     this.document.documentElement.style.setProperty("--sine-web-panels-width", `${width}px`);
+  }
+
+  #onWindowResize = () => {
+    this.#syncDisplayWidth();
   };
 
   #onDocumentClick = event => {

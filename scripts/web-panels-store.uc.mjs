@@ -3,6 +3,87 @@ export const SEPARATOR_TYPE = "separator";
 export const MIN_PANEL_WIDTH = 320;
 export const DEFAULT_PANEL_WIDTH = 420;
 
+// Panel geometry.
+//
+// Ported from Tom Bar-Gal's ai/local-hardened-baseline branch, which solved
+// this properly: the panel's maximum width has to come from the page viewport
+// Zen actually gives the content, not from window.innerWidth. innerWidth is
+// the whole chrome window, so Zen's left tab sidebar is never subtracted and
+// the panel is free to grow over it.
+//
+// Both functions are pure so the arithmetic can be tested without a browser —
+// the measuring is the caller's job.
+export const PANEL_VIEWPORT_INSET = 8;
+export const PANEL_VIEWPORT_MAX_WIDTH_RATIO = 0.95;
+
+function positiveNumber(value, fallback) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : fallback;
+}
+
+function finiteNumber(value, fallback) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+// Intersect a measured rect with a fallback viewport, so a missing or nonsense
+// measurement degrades to the window rather than to zero.
+export function calculateWebPanelViewportGeometry(rect, fallbackViewport = {}) {
+  const top = finiteNumber(rect?.top, 0);
+  const left = finiteNumber(rect?.left, 0);
+  const width = positiveNumber(rect?.width, positiveNumber(fallbackViewport.width, 1));
+  const height = positiveNumber(
+    rect?.height,
+    positiveNumber(fallbackViewport.height, PANEL_VIEWPORT_INSET * 2)
+  );
+
+  const fallbackTop = finiteNumber(fallbackViewport.top, top);
+  const fallbackLeft = finiteNumber(fallbackViewport.left, left);
+  const fallbackWidth = positiveNumber(fallbackViewport.width, width);
+  const fallbackHeight = positiveNumber(fallbackViewport.height, height);
+
+  const visibleTop = Math.max(top, fallbackTop);
+  const visibleBottom = Math.min(top + height, fallbackTop + fallbackHeight);
+  const visibleLeft = Math.max(left, fallbackLeft);
+  const visibleRight = Math.min(left + width, fallbackLeft + fallbackWidth);
+  const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+  const visibleWidth = Math.max(0, visibleRight - visibleLeft);
+
+  return {
+    top: visibleTop + PANEL_VIEWPORT_INSET,
+    height: Math.max(0, visibleHeight - PANEL_VIEWPORT_INSET * 2),
+    maxWidth: Math.max(1, Math.floor(visibleWidth * PANEL_VIEWPORT_MAX_WIDTH_RATIO)),
+  };
+}
+
+// Turn a measured rect into a maximum, or null when the measurement cannot be
+// trusted. Two ways it cannot: no rect at all (nothing laid out yet), or a
+// maximum below the minimum panel width — which never means "the window is
+// tiny", it means we measured the wrong element. Trusting either would be
+// worse than not clamping: falling back to the whole window is how the panel
+// ends up over Zen's sidebar, and a maximum under the minimum pins every
+// clamp to a single value and freezes the resizer.
+export function panelMaxWidthFromViewport(rect, fallbackViewport, minWidth = MIN_PANEL_WIDTH) {
+  if (!rect || !(Number(rect.width) > 0)) {
+    return null;
+  }
+
+  const { maxWidth } = calculateWebPanelViewportGeometry(rect, fallbackViewport);
+  return maxWidth >= minWidth ? maxWidth : null;
+}
+
+// The minimum yields to the maximum: on a window too narrow for MIN_PANEL_WIDTH
+// a panel that overflows the viewport is worse than one below its floor.
+export function clampWebPanelWidth(width, maxWidth, minWidth = MIN_PANEL_WIDTH) {
+  const safeMax = Math.max(1, Math.floor(Number(maxWidth) || 1));
+  const safeMin = Math.min(
+    safeMax,
+    Math.max(1, Math.round(Number(minWidth) || MIN_PANEL_WIDTH))
+  );
+  const requested = Number.isFinite(Number(width)) ? Math.round(Number(width)) : safeMin;
+  return Math.min(safeMax, Math.max(safeMin, requested));
+}
+
 const PREFS = Object.freeze({
   enabled: "sine.web-panels.enabled",
   collapsed: "sine.web-panels.collapsed",
