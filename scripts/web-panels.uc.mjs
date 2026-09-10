@@ -766,6 +766,21 @@ class SineWebPanels {
     });
   }
 
+  // Promote wherever the panel is now to its configured home. Sites whose URL
+  // encodes an account or workspace (Proton's /u/N, for instance) use indexes
+  // that drift, so pinning the home by hand is guesswork — this lets the panel
+  // record the right one once it is actually there.
+  #setHomeToCurrent(item) {
+    const browser = this.#runtime?.getBrowser(item.id);
+    const spec = browser?.currentURI?.spec;
+    if (!spec || !normalizeWebPanelUrl(spec)) {
+      return;
+    }
+    this.#store.updatePanel(item.id, spec, item.name ?? null);
+    this.#store.forgetUrl(item.id);
+    this.#render();
+  }
+
   #updateNavState() {
     if (!this.#navBar) {
       return;
@@ -1269,6 +1284,7 @@ class SineWebPanels {
           ["Back", () => this.#navGoBack(), this.#activeId !== item.id],
           ["Forward", () => this.#navGoForward(), this.#activeId !== item.id],
           ["Home (reset)", () => this.#navGoHome(item)],
+          ["Set current page as home", () => this.#setHomeToCurrent(item), this.#activeId !== item.id],
           ["separator"],
           ["Open in New Tab", () => this.#openInNewTab(item.url)],
           ["Edit Web Panel", () => this.#openEditor({ mode: "edit", item, anchor: this.#findItemElement(item.id) })],
