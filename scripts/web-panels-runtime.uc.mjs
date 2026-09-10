@@ -15,7 +15,7 @@ export class WebPanelsRuntime {
     return this.#panels.get(id)?.tab?.linkedBrowser ?? null;
   }
 
-  ensurePanelTab(item, parentTab = null) {
+  ensurePanelTab(item, parentTab = null, url = null) {
     const existing = this.#panels.get(item.id) ?? {};
     if (existing.tab && !existing.tab.closing) {
       existing.item = item;
@@ -25,7 +25,7 @@ export class WebPanelsRuntime {
       return existing.tab;
     }
 
-    const tab = this.#createPanelTab(item);
+    const tab = this.#createPanelTab(item, url ?? item.url);
     tab.owner = null;
     tab.setAttribute("sine-web-panel-tab", "true");
     tab.setAttribute("sine-web-panel-id", item.id);
@@ -76,7 +76,7 @@ export class WebPanelsRuntime {
     this.#window = null;
   }
 
-  #createPanelTab(item) {
+  #createPanelTab(item, url) {
     const options = {
       inBackground: true,
       skipAnimation: true,
@@ -85,10 +85,10 @@ export class WebPanelsRuntime {
     };
 
     if (typeof this.#window.gBrowser.addTrustedTab === "function") {
-      return this.#window.gBrowser.addTrustedTab(item.url, options);
+      return this.#window.gBrowser.addTrustedTab(url, options);
     }
 
-    return this.#window.gBrowser.addTab(item.url, options);
+    return this.#window.gBrowser.addTab(url, options);
   }
 
   #setParentTabAttribute(tab, parentTab) {

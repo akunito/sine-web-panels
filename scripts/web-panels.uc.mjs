@@ -99,6 +99,11 @@ class SineWebPanels {
   #resizeState = null;
   #resizeHovering = false;
   #dragState = null;
+  #navBar;
+  #tabsProgressListener;
+  #navBack;
+  #navForward;
+  #navHome;
 
   constructor(windowRef) {
     this.window = windowRef;
@@ -133,10 +138,16 @@ class SineWebPanels {
     if (this.#prefObserver) {
       Services.prefs.removeObserver(WebPanelsStore.prefs.enabled, this.#prefObserver);
     }
+    if (this.#tabsProgressListener) {
+      this.window.gBrowser?.removeTabsProgressListener?.(this.#tabsProgressListener);
+      this.#tabsProgressListener = null;
+    }
     this.#runtime?.destroy();
     this.#resetChromeLayout();
     this.#editor?.remove();
     this.#tabContextMenuItem?.remove();
+    this.#navBar?.remove();
+    this.#navBar = null;
     this.#resizer?.remove();
     this.#root?.remove();
     this.#activeId = null;
@@ -212,6 +223,24 @@ class SineWebPanels {
     this.window.addEventListener("resize", this.#onWindowResize, { signal });
     this.document.addEventListener("click", this.#onDocumentClick, { signal });
     this.document.addEventListener("keydown", this.#onKeyDown, { signal });
+    this.#tabsProgressListener = {
+      onLocationChange: (browser, _webProgress, _request, _location, _flags) => {
+        const tab = this.window.gBrowser?.getTabForBrowser?.(browser);
+        const panelId = tab?.getAttribute?.("sine-web-panel-id");
+        if (!panelId) {
+          return;
+        }
+
+        const item = this.#items.find(entry => entry.id === panelId);
+        if (item) {
+          this.#rememberLocation(item, browser);
+        }
+        if (panelId === this.#activeId) {
+          this.#updateNavState();
+        }
+      },
+    };
+    this.window.gBrowser?.addTabsProgressListener?.(this.#tabsProgressListener);
     this.window.gBrowser?.tabContainer?.addEventListener("TabSelect", this.#onTabSelect, { signal });
     this.window.gBrowser?.tabContainer?.addEventListener("TabClose", this.#onTabClose, { signal });
     this.window.gBrowser?.tabContainer?.addEventListener("TabAttrModified", this.#onTabAttrModified, { signal });
@@ -268,6 +297,10 @@ class SineWebPanels {
     }
 
     this.#closePanel({ animate: false });
+    if (this.#tabsProgressListener) {
+      this.window.gBrowser?.removeTabsProgressListener?.(this.#tabsProgressListener);
+      this.#tabsProgressListener = null;
+    }
     this.#runtime?.destroy();
     this.#runtime = new WebPanelsRuntime(this.window);
     this.#root.setAttribute("disabled", "true");
@@ -409,7 +442,7 @@ class SineWebPanels {
     }
     const switching = Boolean(this.#activeId && this.#activeId !== item.id);
     const parentTab = this.#currentVisibleTab() ?? this.#activeParentTab;
-    const panelTab = this.#runtime.ensurePanelTab(item, parentTab);
+    const panelTab = this.#runtime.ensurePanelTab(item, parentTab, this.#store.resolveUrl(item));
     if (!this.#openSurface(parentTab, panelTab)) {
       console.warn("[Web Panels] Could not attach managed panel tab to a Zen browser surface.");
       return;
@@ -482,7 +515,7 @@ class SineWebPanels {
     this.#closeSurface({ selectParent: false });
     parentContainer.classList.add("sine-web-panels-parent-background");
     panelContainer.classList.add("deck-selected", "sine-web-panels-overlay");
-    panelFrame.append(this.#resizer);
+    panelFrame.append(this.#buildNavBar(), this.#resizer);
     panelBrowser.setAttribute("sine-web-panel-selected", "true");
     parentBrowser.zenModeActive = true;
     parentBrowser.docShellIsActive = true;
@@ -644,6 +677,67 @@ class SineWebPanels {
     browser.addEventListener("load", update, { signal: this.#abortController.signal });
   }
 
+  // Only remember same-origin destinations: an auth bounce through a provider
+  // must never become the page the panel reopens on.
+  #rememberLocation(item, browser) {
+    const spec = browser?.currentURI?.spec;
+    if (!spec) {
+      return;
+    }
+
+    let sameOrigin = false;
+    try {
+      sameOrigin = new URL(spec).origin === new URL(item.url).origin;
+    } catch {
+      sameOrigin = false;
+    }
+
+    if (sameOrigin) {
+      this.#store.rememberUrl(item.id, spec);
+    }
+  }
+
+  #activePanelBrowser() {
+    return this.#runtime?.getBrowser(this.#activeId) ?? null;
+  }
+
+  #navGoBack() {
+    const browser = this.#activePanelBrowser();
+    if (browser?.canGoBack) {
+      browser.goBack();
+    }
+  }
+
+  #navGoForward() {
+    const browser = this.#activePanelBrowser();
+    if (browser?.canGoForward) {
+      browser.goForward();
+    }
+  }
+
+  // Home is also the reset: without clearing the memory the panel would drift
+  // straight back on the next restart.
+  #navGoHome(item = null) {
+    const target = item ?? this.#items.find(entry => entry.id === this.#activeId);
+    const browser = this.#runtime?.getBrowser(target?.id);
+    if (!target || !browser) {
+      return;
+    }
+    this.#store.forgetUrl(target.id);
+    browser.loadURI(Services.io.newURI(target.url), {
+      triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+    });
+  }
+
+  #updateNavState() {
+    if (!this.#navBar) {
+      return;
+    }
+    const browser = this.#activePanelBrowser();
+    this.#navBack.disabled = !browser?.canGoBack;
+    this.#navForward.disabled = !browser?.canGoForward;
+  }
+
   #syncUnreadFromTab(itemId) {
     const tab = this.#runtime?.get(itemId)?.tab;
     const browser = tab?.linkedBrowser;
@@ -685,6 +779,45 @@ class SineWebPanels {
       icon.removeAttribute("src");
       icon.setAttribute("fallback", "true");
     });
+  }
+
+  // A slim bar pinned to the top of the panel. It stays out of the way until
+  // the panel is hovered (see .sine-web-panels-nav in the stylesheet), so it
+  // costs no space while reading.
+  #buildNavBar() {
+    if (this.#navBar) {
+      this.#updateNavState();
+      return this.#navBar;
+    }
+
+    const bar = this.#el("div", {
+      class: "sine-web-panels-nav",
+      role: "toolbar",
+      "aria-label": "Web panel navigation",
+    });
+
+    const mk = (name, label, handler) => {
+      const button = this.#button({
+        className: `sine-web-panels-nav-button sine-web-panels-nav-${name}`,
+        title: label,
+      });
+      button.setAttribute("aria-label", label);
+      button.addEventListener("click", event => {
+        event.stopPropagation();
+        handler();
+        this.#updateNavState();
+      }, { signal: this.#abortController.signal });
+      return button;
+    };
+
+    this.#navBack = mk("back", "Back", () => this.#navGoBack());
+    this.#navForward = mk("forward", "Forward", () => this.#navGoForward());
+    this.#navHome = mk("home", "Home (reset this panel)", () => this.#navGoHome());
+
+    bar.append(this.#navBack, this.#navForward, this.#navHome);
+    this.#navBar = bar;
+    this.#updateNavState();
+    return bar;
   }
 
   #buildEditor() {
@@ -794,6 +927,10 @@ class SineWebPanels {
     const index = this.#items.findIndex(entry => entry.id === item.id);
     const actions = isPanel(item)
       ? [
+          ["Back", () => this.#navGoBack(), this.#activeId !== item.id],
+          ["Forward", () => this.#navGoForward(), this.#activeId !== item.id],
+          ["Home (reset)", () => this.#navGoHome(item)],
+          ["separator"],
           ["Open in New Tab", () => this.#openInNewTab(item.url)],
           ["Edit Web Panel", () => this.#openEditor({ mode: "edit", item, anchor: this.#findItemElement(item.id) })],
           ["Move Up", () => this.#moveItem(item.id, index - 1), index <= 0],
@@ -858,6 +995,7 @@ class SineWebPanels {
 
   #deleteItem(id) {
     this.#unloadPanel(id);
+    this.#store.forgetUrl(id);
     this.#store.remove(id);
     this.#unreadCounts.delete(id);
     this.#render();
