@@ -1569,14 +1569,18 @@ export class SineWebPanels {
       placeholder: "https://calendar.google.com",
       "aria-label": "Web Panel URL",
     });
-    // Optional name: panels otherwise fall back to their hostname, and nobody
-    // searches for "mail.google.com" when they mean Gmail.
+    // The name lives in Edit only. Adding a panel is one field and one
+    // click; naming is for the exception — two accounts on the same site
+    // auto-name identically — and right-clicking the icon is the moment
+    // someone knows they need it. (Tom's call, 2026-09-09.)
     const nameInput = this.#el("input", {
       id: "sine-web-panels-name-input",
       type: "text",
       placeholder: "Name (optional)",
       "aria-label": "Web Panel name",
+      hidden: "true",
     });
+    nameInput.hidden = true;
     const error = this.#el("div", {
       id: "sine-web-panels-editor-error",
       role: "alert",
@@ -1584,7 +1588,7 @@ export class SineWebPanels {
     });
     const submit = this.#button({
       id: "sine-web-panels-editor-submit",
-      label: "+ Add",
+      label: "Add",
       className: "sine-web-panels-ghost-button",
     });
     submit.type = "submit";
@@ -1612,9 +1616,11 @@ export class SineWebPanels {
     const error = this.#editor.querySelector('[role="alert"]');
     this.#closeMenu();
     this.#editorState = { mode, itemId: item?.id ?? null, insertIndex };
+    this.#editor.setAttribute("mode", mode);
     input.value = item?.url ?? this.#currentTabUrl() ?? "";
     nameInput.value = item?.name ?? "";
-    submit.textContent = mode === "edit" ? "Save" : "+ Add";
+    nameInput.hidden = mode !== "edit";
+    submit.textContent = mode === "edit" ? "Save" : "Add";
     submit.disabled = !input.value.trim();
     error.hidden = true;
     this.#editor.hidden = false;
@@ -1642,7 +1648,9 @@ export class SineWebPanels {
         this.#unloadPanel(updated.id);
       }
     } else {
-      this.#store.insert(this.#store.createPanel(url, nameInput.value), this.#editorState?.insertIndex ?? this.#items.length);
+      // No name on Add: the field is not shown there, and a stale value must
+      // not travel from an earlier Edit.
+      this.#store.insert(this.#store.createPanel(url, ""), this.#editorState?.insertIndex ?? this.#items.length);
     }
 
     this.#closeEditor();

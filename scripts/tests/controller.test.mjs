@@ -457,3 +457,83 @@ test("reload refreshes the page the panel is on, without resetting it", () => {
     "where the panel was is kept"
   );
 });
+
+// --------------------------------------------------------------------------
+// Add is one field and one click; the name lives in Edit.
+// --------------------------------------------------------------------------
+
+function editorOf(app) {
+  const editor = app.document.getElementById("sine-web-panels-editor");
+  return {
+    editor,
+    url: editor.querySelector("#sine-web-panels-url-input"),
+    name: editor.querySelector("#sine-web-panels-name-input"),
+    submit: editor.querySelector("#sine-web-panels-editor-submit"),
+    form: editor.querySelector("#sine-web-panels-editor-content"),
+  };
+}
+
+function items(app) {
+  return JSON.parse(app.prefs.getStringPref("sine.web-panels.items"));
+}
+
+test("Add asks for the URL and nothing else", () => {
+  const app = mount();
+  app.addTab({ url: "https://calendar.example/", select: true });
+
+  app.el("add-button").dispatch("click");
+
+  const { editor, url, name, submit } = editorOf(app);
+  assert.equal(editor.hidden, false);
+  assert.equal(editor.getAttribute("mode"), "add");
+  assert.equal(name.hidden, true, "no name field on Add");
+  assert.equal(submit.textContent, "Add");
+  assert.equal(url.value, "https://calendar.example/", "prefilled from the current tab");
+});
+
+test("a panel added from the popup carries no name, even after an Edit left one behind", () => {
+  const { app } = mountWithPanels(["https://mail.example/"]);
+  const { editor, url, name, form } = editorOf(app);
+
+  railButton(app, "panel-1").dispatch("contextmenu");
+  const edit = [...app.document.querySelectorAll(".sine-web-panels-menu-item")].find(
+    button => button.textContent === "Edit Web Panel"
+  );
+  edit.dispatch("click");
+  name.value = "Work";
+  form.dispatch("submit");
+
+  app.el("add-button").dispatch("click");
+  url.value = "https://calendar.example/";
+  form.dispatch("submit");
+
+  const added = items(app).find(item => item.url === "https://calendar.example/");
+  assert.ok(added, "the panel was added");
+  assert.equal(added.name, undefined);
+  assert.equal(editor.hidden, true, "the popup closed");
+});
+
+test("Edit shows the URL and the name together, and saves both", () => {
+  const { app } = mountWithPanels(["https://mail.example/"]);
+
+  railButton(app, "panel-1").dispatch("contextmenu");
+  const edit = [...app.document.querySelectorAll(".sine-web-panels-menu-item")].find(
+    button => button.textContent === "Edit Web Panel"
+  );
+  assert.ok(edit, "the context menu offers Edit");
+  edit.dispatch("click");
+
+  const { editor, url, name, submit, form } = editorOf(app);
+  assert.equal(editor.getAttribute("mode"), "edit");
+  assert.equal(name.hidden, false, "the name field is there");
+  assert.equal(url.value, "https://mail.example/");
+  assert.equal(submit.textContent, "Save");
+
+  name.value = "Personal";
+  url.value = "https://mail.example/u/1/";
+  form.dispatch("submit");
+
+  const [saved] = items(app);
+  assert.equal(saved.name, "Personal");
+  assert.equal(saved.url, "https://mail.example/u/1/");
+});

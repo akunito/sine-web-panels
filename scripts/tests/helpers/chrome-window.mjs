@@ -236,6 +236,10 @@ export class FakeElement {
     return found;
   }
 
+  focus() {}
+  select() {}
+  blur() {}
+
   getBoundingClientRect() {
     return { ...this.rect, right: this.rect.left + this.rect.width, bottom: this.rect.top + this.rect.height };
   }
@@ -491,6 +495,9 @@ export function createChromeWindow({ prefs = {}, viewportWidth = 1600 } = {}) {
   tabpanels.id = "tabbrowser-tabpanels";
   appContent.append(tabpanels);
   window.gBrowser.tabpanels = tabpanels;
+
+  // CSS.escape is a browser global the controller uses to build selectors.
+  globalThis.CSS = { escape: value => String(value).replace(/([^\w-])/g, "\\$1") };
 
   globalThis.Services = {
     appinfo: { OS: "Linux" },

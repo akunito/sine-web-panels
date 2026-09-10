@@ -1,4 +1,15 @@
 :root {
+  /* Every popup of ours (menu, finder, Add/Edit) paints on this. Opaque on
+     purpose: Zen's own arrow panels follow its translucent primary colour and
+     the page read through the fields. --zen-dialog-background is the solid
+     Zen uses for its dialogs; the fallback matches its values.
+     On :root, not on the rail: the Add/Edit panel hangs off mainPopupSet and
+     inherits nothing from #sine-web-panels-root — a token defined there is
+     invalid inside the popup, and an invalid background paints transparent. */
+  --sine-web-panels-opaque-surface: var(
+    --zen-dialog-background,
+    light-dark(rgb(250, 251, 255), rgb(28, 28, 28))
+  );
   --sine-web-panels-rail-size: 36px;
   --sine-web-panels-gap: 6px;
   --sine-web-panels-visible-rail-size: calc(
@@ -591,10 +602,33 @@ tab[sine-web-panel-tab="true"] {
   -moz-appearance: none;
   box-sizing: border-box;
   --sine-web-panels-panel-color: var(--arrowpanel-color, CanvasText);
+  /* Toolkit paints ::part(content) with --panel-background-color, and Zen
+     points that at its translucent primary colour. Sine loads this sheet at
+     user level, so the override needs !important to beat Zen's author rule. */
+  --panel-background-color: var(--sine-web-panels-opaque-surface) !important;
+  --arrowpanel-background: var(--sine-web-panels-opaque-surface) !important;
+  /* Toolkit keeps a transparent 8px ring around an arrow panel for its
+     shadow, and the page shows through that ring. Against a dark page the
+     ring plus a near-identical grey read as a translucent popup. No ring:
+     the popup's box is exactly its content, painted on the host as well so
+     the result does not depend on ::part(content) matching. */
+  --panel-box-shadow-margin: 0px !important;
+  background: var(--sine-web-panels-opaque-surface) !important;
+  /* Direct values, for the same reason: the rail's border and radius tokens
+     do not reach this element. */
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent) !important;
+  border-radius: var(--panel-border-radius, 12px) !important;
   color: var(--sine-web-panels-panel-color);
   font: menu;
 }
 
+#sine-web-panels-editor::part(content) {
+  background: var(--sine-web-panels-opaque-surface) !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
+/* Add: [ URL ........ ][ Add ]. Edit: the same row, with Name under it. */
 #sine-web-panels-editor-content {
   box-sizing: border-box;
   width: min(520px, calc(100vw - 32px));
@@ -607,7 +641,24 @@ tab[sine-web-panel-tab="true"] {
   font: menu;
 }
 
-#sine-web-panels-url-input {
+#sine-web-panels-editor-submit {
+  grid-column: 2;
+  justify-self: end;
+}
+
+/* In Edit the URL spans the row like Name does, so the two fields line up
+   and Save drops to its own row on the right. */
+#sine-web-panels-editor[mode="edit"] #sine-web-panels-url-input,
+#sine-web-panels-name-input {
+  grid-column: 1 / -1;
+}
+
+#sine-web-panels-name-input[hidden] {
+  display: none;
+}
+
+#sine-web-panels-url-input,
+#sine-web-panels-name-input {
   appearance: none;
   -moz-appearance: none;
   box-sizing: border-box;
@@ -625,14 +676,16 @@ tab[sine-web-panel-tab="true"] {
   caret-color: currentColor;
 }
 
-#sine-web-panels-url-input:hover {
+#sine-web-panels-url-input:hover,
+#sine-web-panels-name-input:hover {
   background: var(
     --button-background-color-ghost-hover,
     color-mix(in srgb, currentColor 10%, transparent)
   );
 }
 
-#sine-web-panels-url-input:focus {
+#sine-web-panels-url-input:focus,
+#sine-web-panels-name-input:focus {
   background: var(
     --button-background-color-ghost-hover,
     color-mix(in srgb, currentColor 10%, transparent)
@@ -701,12 +754,11 @@ tab[sine-web-panel-tab="true"] {
   padding: 6px;
   border: 1px solid var(--sine-web-panels-panel-border);
   border-radius: var(--sine-web-panels-panel-radius);
-  background: var(--sine-web-panels-panel-background);
+  background: var(--sine-web-panels-opaque-surface);
   color: var(--sine-web-panels-panel-color);
   box-shadow:
     0 0 0 1px color-mix(in srgb, white 4%, transparent) inset,
     var(--windows-panel-box-shadow, var(--sine-web-panels-shadow));
-  backdrop-filter: blur(24px) saturate(140%) brightness(1.08);
   font: menu;
   pointer-events: auto;
 }
@@ -863,7 +915,7 @@ tab[sine-web-panel-tab="true"] {
   gap: 6px;
   padding: 8px;
   border-radius: 10px;
-  background: var(--zen-themed-toolbar-bg, Field);
+  background: var(--sine-web-panels-opaque-surface);
   color: FieldText;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
 }
@@ -979,3 +1031,4 @@ tab[sine-web-panel-tab="true"] {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+

@@ -12,7 +12,7 @@ Version `0.4.0` is Zen-only. It uses Zen-managed hidden tabs and Zen browser con
 
 - Persistent web panel URLs stored in `sine.web-panels.items`.
 - Favicon rail with a bottom `+` button.
-- URL-only add/edit popup with validation for `http` and `https`.
+- URL-only Add popup with validation for `http` and `https`; Edit (right-click a panel) adds an optional name, for when two accounts on one site would otherwise look the same.
 - Tab context-menu action to add the clicked web tab to Web Panels.
 - Floating panel surface that opens above the page without resizing it.
 - Managed hidden-tab runtime for extension-compatible panel pages.

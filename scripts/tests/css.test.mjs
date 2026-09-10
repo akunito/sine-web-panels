@@ -84,3 +84,60 @@ test("the navigation controls leave when a panel's video goes fullscreen", () =>
   const fullscreen = rule(":root[sine-web-panels-panel-fullscreen] .sine-web-panels-nav");
   assert.match(fullscreen, /display:\s*none/);
 });
+
+// --------------------------------------------------------------------------
+// Add / Edit popup. Tom's #3: Add is URL-only with the button on the right,
+// the name lives in Edit, and the popup is opaque.
+// --------------------------------------------------------------------------
+
+test("every popup of ours is opaque", () => {
+  // Sine loads the sheet at user level, so beating Zen's translucent
+  // --panel-background-color on the arrow panel takes !important.
+  const editor = rule("#sine-web-panels-editor");
+  assert.match(editor, /--panel-background-color:\s*var\(--sine-web-panels-opaque-surface\)\s*!important/);
+  // The transparent shadow ring toolkit keeps around an arrow panel is what
+  // let the page show around the fields; the host is painted too, so the
+  // popup is opaque whether or not ::part(content) matches.
+  assert.match(editor, /--panel-box-shadow-margin:\s*0px\s*!important/);
+  assert.match(editor, /\n  background:\s*var\(--sine-web-panels-opaque-surface\)\s*!important/);
+  assert.match(editor, /border:\s*1px solid/);
+  const content = rule("#sine-web-panels-editor::part(content)");
+  assert.match(content, /background:\s*var\(--sine-web-panels-opaque-surface\)\s*!important/);
+  assert.match(content, /backdrop-filter:\s*none/);
+
+  for (const selector of ["#sine-web-panels-menu", "#sine-web-panels-finder"]) {
+    const popup = rule(selector);
+    assert.match(popup, /background:\s*var\(--sine-web-panels-opaque-surface\)/, selector);
+    assert.doesNotMatch(popup, /backdrop-filter:\s*blur/, `${selector} has no blur`);
+  }
+
+  const token = css.match(/--sine-web-panels-opaque-surface:\s*var\(\s*--zen-dialog-background,\s*light-dark\(([^)]*)\)/);
+  assert.ok(token, "the surface follows Zen's dialog colour with a solid fallback");
+  assert.doesNotMatch(token[1], /rgba|transparent/, "the fallback is solid");
+});
+
+test("the popup surface is defined where the Add/Edit panel can see it", () => {
+  // The panel hangs off mainPopupSet, outside the rail, so a token declared
+  // on #sine-web-panels-root is invalid there and the background paints
+  // transparent — which is exactly how the page came to show through the
+  // fields.
+  assert.match(rule(":root"), /--sine-web-panels-opaque-surface:/);
+  const editor = rule("#sine-web-panels-editor");
+  for (const token of editor.matchAll(/var\(--sine-web-panels-([a-z-]+)/g)) {
+    assert.ok(
+      ["opaque-surface", "panel-color"].includes(token[1]),
+      `the editor uses rail-scoped token --sine-web-panels-${token[1]}`
+    );
+  }
+});
+
+test("the name field takes no room when it is not shown", () => {
+  assert.match(rule("#sine-web-panels-name-input[hidden]"), /display:\s*none/);
+  assert.match(rule("#sine-web-panels-editor-submit"), /justify-self:\s*end/, "Add sits on the right");
+});
+
+test("in Edit the URL and the name are the same width", () => {
+  const span = rule('#sine-web-panels-editor[mode="edit"] #sine-web-panels-url-input,\n#sine-web-panels-name-input');
+  assert.match(span, /grid-column:\s*1 \/ -1/);
+  assert.match(rule("#sine-web-panels-editor-submit"), /grid-column:\s*2/, "Save drops to its own row");
+});
