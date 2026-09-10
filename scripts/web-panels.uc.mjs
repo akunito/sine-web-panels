@@ -147,6 +147,7 @@ export class SineWebPanels {
   #abortController = new AbortController();
   #prefObserver;
   #sessionRestoreObserver;
+  #correctingSelection = false;
   #resizeState = null;
   #resizeHovering = false;
   #dragState = null;
@@ -930,6 +931,20 @@ export class SineWebPanels {
     parentBrowser.docShellIsActive = true;
     panelBrowser.zenModeActive = true;
     panelBrowser.docShellIsActive = true;
+    // Recorded BEFORE the panel tab is selected. Selecting it fires TabSelect
+    // synchronously, and #onTabSelect reads this to tell the panel's own
+    // backing from a stray one — with it unset, the guard took the selection
+    // straight back off the panel that was opening, and every panel "opened"
+    // whichever ordinary tab came first in the strip.
+    this.#surfaceState = {
+      parentTab,
+      panelTab,
+      parentBrowser,
+      panelBrowser,
+      parentContainer,
+      panelContainer,
+      panelFrame,
+    };
     // Select the PANEL tab so WebExtensions resolve the panel's site:
     // tabs.query({active:true}) is how password managers pick a context, and
     // with the parent selected they offer credentials for the page behind the
@@ -942,16 +957,6 @@ export class SineWebPanels {
     if (parentTab) {
       parentTab._visuallySelected = true;
     }
-    this.#surfaceState = {
-      parentTab,
-      panelTab,
-      parentBrowser,
-      panelBrowser,
-      parentContainer,
-      panelContainer,
-      panelFrame,
-    };
-    // must run after #surfaceState exists — it reads parentContainer from it
     this.#keepParentPainted();
     return true;
   }
@@ -2020,12 +2025,34 @@ export class SineWebPanels {
   };
 
   #onTabSelect = () => {
+    const selected = this.window.gBrowser?.selectedTab ?? null;
+    // The surface, not #activeId: #openSurface selects the panel tab before
+    // #openPanel gets to assign #activeId, and the TabSelect lands in between.
+    const activePanelTab =
+      this.#surfaceState?.panelTab ?? (this.#activeId ? this.#runtime?.get(this.#activeId)?.tab : null);
+
+    // The address bar offers hidden tabs as switch-to-tab candidates —
+    // UrlbarProviderOpenTabs does not filter on hidden — so searching for a
+    // panel's own site lands the window on that panel's backing tab. There is
+    // no way out of that state by hand: the page fills the window with no
+    // panel around it, and no panel will open, because opening one needs a
+    // visible tab to anchor the overlay to and the selected tab is the panel.
+    // Restarting with a panel open used to arrive at the same place.
+    //
+    // Selecting a backing is only ever legitimate when it is the open panel's
+    // own, which #openSurface does deliberately so extensions resolve the
+    // panel's site.
+    if (selected && selected !== activePanelTab && this.#isPanelTab(selected)) {
+      this.#takeSelectionOffPanelTab(selected);
+      return;
+    }
+
     if (!this.#activeId) {
       return;
     }
 
-    const selectedTab = this.window.gBrowser?.selectedTab;
-    const panelTab = this.#runtime?.get(this.#activeId)?.tab;
+    const selectedTab = selected;
+    const panelTab = activePanelTab;
     // The panel tab is intentionally selected while a panel is open.
     if (selectedTab === panelTab) {
       if (this.#activeParentTab && !this.#activeParentTab.closing) {
@@ -2039,6 +2066,35 @@ export class SineWebPanels {
       this.#closePanel({ animate: false });
     }
   };
+
+  // Hand the window back to a real tab. Nothing more.
+  //
+  // An earlier version also opened the panel the backing belonged to, on the
+  // grounds that picking its site out of the address bar is someone asking for
+  // exactly that. It span, because the guard then mistook the panel's own
+  // selection for another stray backing (see #onTabSelect) and opened it
+  // again, forever. The browser crawled and no panel worked at all.
+  //
+  // Holding the invariant is the job; guessing intent is not worth a loop.
+  // Re-entrancy is blocked too, because correcting the selection is itself a
+  // selection change.
+  #takeSelectionOffPanelTab(tab) {
+    if (this.#correctingSelection) {
+      return;
+    }
+
+    const replacement = this.#firstOrdinaryTab();
+    if (!replacement || replacement === tab) {
+      return;
+    }
+
+    this.#correctingSelection = true;
+    try {
+      this.window.gBrowser.selectedTab = replacement;
+    } finally {
+      this.#correctingSelection = false;
+    }
+  }
 
   #onTabClose = event => {
     const tab = event.target;
@@ -2130,7 +2186,17 @@ export class SineWebPanels {
       return this.#activeParentTab;
     }
 
-    return null;
+    // Returning null here is what made every panel refuse to open once the
+    // window was sitting on a backing tab: #openSurface needs a parent, and
+    // without one it bails. Any ordinary tab will do as an anchor.
+    return this.#firstOrdinaryTab();
+  }
+
+  // A tab the window can actually show: not one of ours, not on its way out.
+  #firstOrdinaryTab() {
+    const gBrowser = this.window.gBrowser;
+    const tabs = gBrowser?.visibleTabs ?? gBrowser?.tabs ?? [];
+    return [...tabs].find(tab => tab && !tab.closing && !this.#isPanelTab(tab)) ?? null;
   }
 
   #isPanelTab(tab) {

@@ -68,6 +68,7 @@ function createWindow() {
     },
     gBrowser: {
       tabs,
+      selectedTab: null,
       addTrustedTab(url, options) {
         calls.push({ name: "addTrustedTab", url, options });
         const tab = new FakeTab(url);
@@ -75,6 +76,12 @@ function createWindow() {
         return tab;
       },
       hideTab(tab, reason) {
+        // Zen's hideTab returns early on the selected tab, silently. Model it,
+        // or a test goes green while the browser does nothing at all.
+        if (tab === this.selectedTab || tab.closing || tab.hidden) {
+          return;
+        }
+        tab.hidden = true;
         hiddenTabs.push({ tab, reason });
       },
       removeTab(tab, options) {
@@ -95,6 +102,7 @@ function restartWindow(windowRef) {
   for (const tab of windowRef.tabs) {
     tab.attributes.clear();
     tab.owner = undefined;
+    tab.hidden = false;
   }
   windowRef.hiddenTabs.length = 0;
   windowRef.calls.length = 0;
@@ -291,4 +299,47 @@ test("a duplicate backing is swept rather than replacing the live tab", () => {
   assert.deepEqual(adopted, ["panel-1"], "the live one is still claimed");
   assert.equal(windowRef.removedTabs[0]?.tab, stale);
   assert.equal(runtime.get("panel-1")?.tab, live, "the live tab is kept");
+});
+
+// --------------------------------------------------------------------------
+// The selected tab. Opening a panel selects its tab, so that is the state the
+// session is saved in — and Zen's hideTab returns early on the selected tab,
+// silently. Adopting one without moving the selection first leaves the window
+// displaying a panel backing as an ordinary tab, with every panel then unable
+// to open because there is no visible tab to anchor the overlay to.
+// --------------------------------------------------------------------------
+
+test("a restored panel tab that holds the selection gives it up before hiding", () => {
+  const windowRef = createWindow();
+  const ordinary = new FakeTab("https://news.example/");
+  windowRef.tabs.push(ordinary);
+
+  const item = { id: "panel-1", url: "https://mail.example/" };
+  const panelTab = new WebPanelsRuntime(windowRef).ensurePanelTab(item);
+  restartWindow(windowRef);
+  // Session restore brings it back selected, because that is how it was saved.
+  windowRef.gBrowser.selectedTab = panelTab;
+
+  const runtime = new WebPanelsRuntime(windowRef);
+  const { adopted } = runtime.adoptRestoredTabs([item]);
+
+  assert.deepEqual(adopted, ["panel-1"]);
+  assert.equal(windowRef.gBrowser.selectedTab, ordinary, "selection handed over");
+  assert.equal(panelTab.hidden, true, "and the hide actually took");
+});
+
+test("the last tab in a window is left visible rather than stranding it", () => {
+  const windowRef = createWindow();
+  const item = { id: "panel-1", url: "https://mail.example/" };
+  const panelTab = new WebPanelsRuntime(windowRef).ensurePanelTab(item);
+  restartWindow(windowRef);
+  windowRef.gBrowser.selectedTab = panelTab;
+
+  const runtime = new WebPanelsRuntime(windowRef);
+  const { adopted, swept } = runtime.adoptRestoredTabs([item]);
+
+  assert.deepEqual(adopted, [], "not claimed");
+  assert.deepEqual(swept, [], "and certainly not deleted");
+  assert.equal(panelTab.hidden, false, "a window must not sit on a hidden tab");
+  assert.equal(windowRef.gBrowser.selectedTab, panelTab);
 });

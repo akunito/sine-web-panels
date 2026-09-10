@@ -81,8 +81,9 @@ export class WebPanelsRuntime {
         continue;
       }
 
-      this.#claimTab(tab, item, this.#panels.get(panelId)?.parentTab ?? null);
-      adopted.push(panelId);
+      if (this.#claimTab(tab, item, this.#panels.get(panelId)?.parentTab ?? null)) {
+        adopted.push(panelId);
+      }
     }
 
     return { adopted, swept };
@@ -126,6 +127,16 @@ export class WebPanelsRuntime {
   }
 
   #claimTab(tab, item, parentTab = null) {
+    // Opening a panel selects its tab, so that is the state the session is
+    // saved in and the state it is restored in. Zen's hideTab returns early on
+    // the selected tab — silently, no error — so hiding without checking
+    // leaves the window sitting on a panel backing displayed as an ordinary
+    // tab. From there nothing works: opening any panel needs a visible tab to
+    // anchor the overlay to, and the selected one is the panel itself.
+    if (!this.#releaseSelection(tab)) {
+      return false;
+    }
+
     tab.owner = null;
     tab.setAttribute(PANEL_TAB_ATTRIBUTE, "true");
     tab.setAttribute(PANEL_ID_ATTRIBUTE, item.id);
@@ -134,6 +145,32 @@ export class WebPanelsRuntime {
 
     this.#window.gBrowser.hideTab?.(tab, TAB_HIDE_OWNER);
     this.#panels.set(item.id, { item, parentTab, tab });
+    return true;
+  }
+
+  // Hands the selection to an ordinary tab if this one holds it. False when
+  // there is nothing to hand it to — the one case where hiding would strand
+  // the window on a tab it cannot show, so the caller leaves the tab alone
+  // instead.
+  #releaseSelection(tab) {
+    const gBrowser = this.#window?.gBrowser;
+    if (!gBrowser || gBrowser.selectedTab !== tab) {
+      return true;
+    }
+
+    const replacement = this.#allTabs().find(
+      candidate => candidate !== tab && !candidate.closing && !this.#backingPanelId(candidate)
+    );
+    if (!replacement) {
+      console.warn(
+        "[Web Panels] A panel tab holds the selection and there is no other tab " +
+          "to move it to, so it stays visible rather than stranding the window."
+      );
+      return false;
+    }
+
+    gBrowser.selectedTab = replacement;
+    return true;
   }
 
   #allTabs() {

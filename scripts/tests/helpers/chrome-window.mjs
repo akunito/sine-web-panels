@@ -61,6 +61,10 @@ class FakeStyle {
   }
 }
 
+function kebab(name) {
+  return String(name).replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`);
+}
+
 export class FakeElement {
   constructor(tagName = "div", ownerDocument = null) {
     this.tagName = tagName;
@@ -76,6 +80,18 @@ export class FakeElement {
     this.disabled = false;
     this.rect = { top: 0, left: 0, width: 0, height: 0 };
     this._key = `el-${nextId++}`;
+    // dataset.itemId <-> data-item-id, so attribute selectors see it.
+    this.dataset = new Proxy(
+      {},
+      {
+        get: (_, key) => this.attributes.get(`data-${kebab(key)}`),
+        set: (_, key, value) => {
+          this.attributes.set(`data-${kebab(key)}`, String(value));
+          return true;
+        },
+        deleteProperty: (_, key) => this.attributes.delete(`data-${kebab(key)}`),
+      }
+    );
   }
 
   get id() {
@@ -408,12 +424,43 @@ export function createChromeWindow({ prefs = {}, viewportWidth = 1600 } = {}) {
     },
     gBrowser: {
       tabs: [],
-      visibleTabs: [],
-      selectedTab: null,
+      // A getter, like the browser's: a hidden tab must drop out of it, or the
+      // controller's "find me an ordinary tab" never sees the truth.
+      get visibleTabs() {
+        return this.tabs.filter(tab => !tab.hidden);
+      },
+      _selectedTab: null,
+      get selectedTab() {
+        return this._selectedTab;
+      },
+      // Assigning fires TabSelect synchronously, as the browser does. A plain
+      // property here swallowed the event, and that hid a guard which undid
+      // every panel the moment it opened.
+      set selectedTab(tab) {
+        if (tab === this._selectedTab) return;
+        this._selectedTab = tab;
+        this.tabContainer.dispatch("TabSelect", { target: tab });
+      },
       tabContainer: new FakeElement("tabs", document),
+      tabpanels: null,
       addTrustedTab(url) {
+        return this._addTab(url);
+      },
+      // Builds the slice of Zen's tab deck that #openSurface anchors to:
+      // .browserSidebarContainer > .browserContainer > browser.
+      _addTab(url = "about:blank") {
         const tab = new FakeElement("tab", document);
-        tab.linkedBrowser = new FakeElement("browser", document);
+        const container = new FakeElement("vbox", document);
+        container.classList.add("browserSidebarContainer");
+        const frame = new FakeElement("vbox", document);
+        frame.classList.add("browserContainer");
+        const linkedBrowser = new FakeElement("browser", document);
+        linkedBrowser.currentURI = { spec: url };
+        frame.append(linkedBrowser);
+        container.append(frame);
+        this.tabpanels.append(container);
+        tab.linkedBrowser = linkedBrowser;
+        tab.linkedPanel = container;
         this.tabs.push(tab);
         return tab;
       },
@@ -430,6 +477,11 @@ export function createChromeWindow({ prefs = {}, viewportWidth = 1600 } = {}) {
   };
 
   document.defaultView = window;
+
+  const tabpanels = new FakeElement("tabpanels", document);
+  tabpanels.id = "tabbrowser-tabpanels";
+  appContent.append(tabpanels);
+  window.gBrowser.tabpanels = tabpanels;
 
   globalThis.Services = {
     appinfo: { OS: "Linux" },
@@ -454,6 +506,20 @@ export function createChromeWindow({ prefs = {}, viewportWidth = 1600 } = {}) {
     browser,
     appContent,
     prefs: globalThis.Services.prefs,
+
+    /** A tab in the strip, with the deck DOM the controller anchors panels to. */
+    addTab({ url = "about:blank", panelId = null, hidden = false, select = false } = {}) {
+      const tab = window.gBrowser._addTab(url);
+      tab.hidden = hidden;
+      if (panelId) {
+        tab.setAttribute("sine-web-panel-tab", "true");
+        tab.setAttribute("sine-web-panel-id", panelId);
+      }
+      if (select) {
+        window.gBrowser.selectedTab = tab;
+      }
+      return tab;
+    },
 
     /** Runs every timer due within `ms`, so peek timing is asserted not waited on. */
     advance(ms) {

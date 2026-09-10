@@ -6,6 +6,7 @@ const PREFS = {
   enabled: "sine.web-panels.enabled",
   collapsed: "sine.web-panels.collapsed",
   width: "sine.web-panels.width",
+  items: "sine.web-panels.items",
 };
 
 // The controller reads globalThis.Services at import time, and createChromeWindow
@@ -223,4 +224,156 @@ test("a colour that could escape the declaration never reaches the DOM", () => {
   app.prefs.setStringPref("sine.web-panels.resizer-color", "red; background: url(x)");
 
   assert.equal(app.document.documentElement.style.has("--sine-web-panels-accent"), false);
+});
+
+// --------------------------------------------------------------------------
+// The window must never rest on a panel's backing tab. Two ways it got there:
+// restoring a session saved with a panel open, and picking the panel's own
+// site out of the address bar — UrlbarProviderOpenTabs does not filter hidden
+// tabs, so backings are offered as switch-to-tab candidates. Once there, the
+// page fills the window with no panel around it and no panel will open at all.
+// --------------------------------------------------------------------------
+
+// The harness's selectedTab fires TabSelect on assignment, as the browser's
+// does, so selecting a tab below is the whole gesture.
+
+test("selecting a panel's backing tab hands the window straight back", () => {
+  const app = mount();
+  const ordinary = app.addTab();
+  const backing = app.addTab({ panelId: "panel-1", hidden: true });
+
+  app.window.gBrowser.selectedTab = backing;
+
+  assert.equal(
+    app.window.gBrowser.selectedTab,
+    ordinary,
+    "the window cannot be left displaying a backing tab"
+  );
+});
+
+test("an ordinary tab is left selected", () => {
+  const app = mount();
+  const first = app.addTab();
+  const second = app.addTab();
+
+  app.window.gBrowser.selectedTab = second;
+
+  assert.equal(app.window.gBrowser.selectedTab, second, "no meddling");
+  assert.notEqual(app.window.gBrowser.selectedTab, first);
+});
+
+test("the recovery holds when the backing is the tab a search landed on", () => {
+  // Same invariant from the other entrance: no restart involved, the address
+  // bar simply offered a hidden backing as a switch-to-tab candidate.
+  const app = mount();
+  app.addTab();
+  const backing = app.addTab({ panelId: "panel-1", hidden: true });
+
+  app.window.gBrowser.selectedTab = backing;
+  // And again, in case the first correction is itself re-overridden — session
+  // restore re-selects its own idea of the selected tab after we have run.
+  app.window.gBrowser.selectedTab = backing;
+
+  assert.notEqual(app.window.gBrowser.selectedTab, backing);
+});
+
+test("correcting the selection cannot set off another correction", () => {
+  // The regression this pins: the guard used to open the panel it had just
+  // taken the selection from. #openSurface selects that panel's tab on
+  // purpose, and #activeId is only set after it returns, so the TabSelect
+  // that fired looked like another stray backing — and round it went. Zen
+  // crawled and every panel stopped working.
+  const app = mount();
+  const ordinary = app.addTab();
+  const backing = app.addTab({ panelId: "panel-1", hidden: true });
+
+  let selections = 0;
+  const gBrowser = app.window.gBrowser;
+  let current = backing;
+  // Counting every assignment is the point here, so the harness's own
+  // accessor is replaced by one that also keeps score.
+  Object.defineProperty(gBrowser, "selectedTab", {
+    configurable: true,
+    get: () => current,
+    set(tab) {
+      current = tab;
+      selections += 1;
+      assert.ok(selections < 10, "the guard is looping");
+      gBrowser.tabContainer.dispatch("TabSelect", { target: tab });
+    },
+  });
+
+  gBrowser.tabContainer.dispatch("TabSelect", { target: backing });
+
+  assert.equal(gBrowser.selectedTab, ordinary);
+  assert.ok(selections <= 2, `settled in ${selections} selection(s)`);
+});
+
+// --------------------------------------------------------------------------
+// Opening a panel selects its backing tab on purpose — that is how extensions
+// resolve the panel's site. The guard above must recognise that as the
+// controller's own doing, or it undoes every panel the moment it opens: the
+// TabSelect it fires arrives before #activeId is assigned, so to the guard the
+// backing looked stray, and the window was handed to the first ordinary tab
+// instead. Every panel "opened" whatever tab happened to be first in the strip.
+// --------------------------------------------------------------------------
+
+function mountWithPanels(urls) {
+  const items = urls.map((url, index) => ({ type: "panel", id: `panel-${index + 1}`, url }));
+  const app = mount({ prefs: { [PREFS.items]: JSON.stringify(items) } });
+  const ordinary = app.addTab({ url: "https://plane.example/", select: true });
+  return { app, ordinary, items };
+}
+
+function railButton(app, id) {
+  return app.root().querySelector(`[data-item-id="${id}"]`);
+}
+
+test("opening a panel from the rail leaves it open, on its own tab", () => {
+  const { app, ordinary } = mountWithPanels(["https://mail.example/"]);
+
+  railButton(app, "panel-1").dispatch("click");
+
+  const selected = app.window.gBrowser.selectedTab;
+  assert.equal(app.root().getAttribute("open"), "true", "the panel is open");
+  assert.equal(app.root().getAttribute("active"), "panel-1");
+  assert.equal(selected.getAttribute("sine-web-panel-id"), "panel-1", "its backing holds the selection");
+  assert.notEqual(selected, ordinary, "the window was not handed back to the first ordinary tab");
+  assert.ok(
+    selected.linkedPanel.classList.contains("sine-web-panels-overlay"),
+    "and its container is the overlay"
+  );
+});
+
+test("switching panels moves the selection to the new panel's tab", () => {
+  const { app, ordinary } = mountWithPanels(["https://mail.example/", "https://plane.example/app"]);
+
+  railButton(app, "panel-1").dispatch("click");
+  railButton(app, "panel-2").dispatch("click");
+
+  const selected = app.window.gBrowser.selectedTab;
+  assert.equal(app.root().getAttribute("active"), "panel-2");
+  assert.equal(selected.getAttribute("sine-web-panel-id"), "panel-2");
+  assert.notEqual(selected, ordinary);
+});
+
+test("closing a panel hands the window back to the tab it opened over", () => {
+  const { app, ordinary } = mountWithPanels(["https://mail.example/"]);
+
+  railButton(app, "panel-1").dispatch("click");
+  railButton(app, "panel-1").dispatch("click");
+  app.advance(100);
+
+  assert.equal(app.root().hasAttribute("open"), false);
+  assert.equal(app.window.gBrowser.selectedTab, ordinary);
+});
+
+test("a stray backing is still corrected while another panel is open", () => {
+  const { app } = mountWithPanels(["https://mail.example/"]);
+  const stray = app.addTab({ panelId: "panel-9", hidden: true });
+
+  railButton(app, "panel-1").dispatch("click");
+  app.window.gBrowser.selectedTab = stray;
+
+  assert.notEqual(app.window.gBrowser.selectedTab, stray);
 });
