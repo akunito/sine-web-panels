@@ -20,12 +20,22 @@ function panelIndexFromEvent(event) {
   return digit === 0 ? 9 : digit - 1;
 }
 
+// The accelerator is Cmd on macOS and Ctrl everywhere else, so the two flags
+// swap roles by platform. Whichever one is NOT the accelerator must be unheld,
+// otherwise Ctrl+Cmd+1 would also fire on macOS.
+const IS_MACOS = Services.appinfo.OS === "Darwin";
+
 function shortcutMatches(event, spec) {
-  if (!spec || spec === "disabled" || event.metaKey || event.repeat) {
+  if (!spec || spec === "disabled" || event.repeat) {
     return false;
   }
+
+  const accelHeld = IS_MACOS ? event.metaKey : event.ctrlKey;
+  const nonAccelHeld = IS_MACOS ? event.ctrlKey : event.metaKey;
+
   return (
-    event.ctrlKey === spec.includes("ctrl") &&
+    !nonAccelHeld &&
+    accelHeld === spec.includes("accel") &&
     event.altKey === spec.includes("alt") &&
     event.shiftKey === spec.includes("shift")
   );

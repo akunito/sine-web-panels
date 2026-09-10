@@ -10,16 +10,31 @@ const PREFS = Object.freeze({
   shortcutModifier: "sine.web-panels.shortcut-modifier",
 });
 
+// "accel" is the platform's primary modifier: Cmd on macOS, Ctrl elsewhere —
+// the same concept Gecko uses for key elements, so a single setting is correct
+// on every platform.
 export const SHORTCUT_MODIFIERS = Object.freeze([
   "disabled",
-  "ctrl",
-  "ctrl+alt",
-  "ctrl+shift",
+  "accel",
+  "accel+alt",
+  "accel+shift",
   "alt",
   "alt+shift",
 ]);
 
-export const DEFAULT_SHORTCUT_MODIFIER = "ctrl+alt";
+export const DEFAULT_SHORTCUT_MODIFIER = "accel+alt";
+
+// Values written before the setting became platform-neutral.
+const LEGACY_SHORTCUT_MODIFIERS = Object.freeze({
+  ctrl: "accel",
+  "ctrl+alt": "accel+alt",
+  "ctrl+shift": "accel+shift",
+});
+
+export function normalizeShortcutModifier(value) {
+  const migrated = LEGACY_SHORTCUT_MODIFIERS[value] ?? value;
+  return SHORTCUT_MODIFIERS.includes(migrated) ? migrated : DEFAULT_SHORTCUT_MODIFIER;
+}
 
 function generateId(prefix = "item") {
   if (globalThis.crypto?.randomUUID) {
@@ -134,15 +149,13 @@ export class WebPanelsStore {
   }
 
   get shortcutModifier() {
-    const value = readStringPref(PREFS.shortcutModifier, DEFAULT_SHORTCUT_MODIFIER);
-    return SHORTCUT_MODIFIERS.includes(value) ? value : DEFAULT_SHORTCUT_MODIFIER;
+    return normalizeShortcutModifier(
+      readStringPref(PREFS.shortcutModifier, DEFAULT_SHORTCUT_MODIFIER)
+    );
   }
 
   set shortcutModifier(value) {
-    setStringPref(
-      PREFS.shortcutModifier,
-      SHORTCUT_MODIFIERS.includes(value) ? value : DEFAULT_SHORTCUT_MODIFIER
-    );
+    setStringPref(PREFS.shortcutModifier, normalizeShortcutModifier(value));
   }
 
   get items() {
